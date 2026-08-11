@@ -216,14 +216,17 @@ function initSetupPanel() {
 }
 
 function setupTabNavigation() {
-    elements.navTabs.forEach(tab => {
+    const navTabs = document.querySelectorAll('.nav-tab');
+    navTabs.forEach(tab => {
         tab.addEventListener('click', () => {
             const targetTab = tab.getAttribute('data-tab');
-            elements.navTabs.forEach(t => t.classList.remove('active'));
-            elements.tabPages.forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
             tab.classList.add('active');
             const targetPage = document.getElementById(`tab-${targetTab}`);
-            if (targetPage) targetPage.classList.add('active');
+            if (targetPage) {
+                targetPage.classList.add('active');
+            }
         });
     });
 }
@@ -507,12 +510,11 @@ function setupEventListeners() {
     elements.productDetailClose.addEventListener('click', closeAllModals);
 }
 
-function closeAllModals() {
-    if (elements.depositModal) elements.depositModal.classList.remove('active');
-    if (elements.scheduleModal) elements.scheduleModal.classList.remove('active');
-    if (elements.productDetailModal) elements.productDetailModal.classList.remove('active');
-    if (elements.newProductModal) elements.newProductModal.classList.remove('active');
-}
+window.closeAllModals = function() {
+    document.querySelectorAll('.modal-overlay').forEach(modal => {
+        modal.classList.remove('active');
+    });
+};
 
 // Bank Search & Official Information Link Mapping
 const BANK_LINKS = {
