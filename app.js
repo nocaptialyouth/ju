@@ -683,11 +683,10 @@ function parseHospitalTSV(tsvText) {
     }
 }
 
-// Reset-First Grid Parser (Cleanly reflects deletions, edits, and additions)
+// Multi-Section Reset-First Grid Parser (Eliminates column leakage and duplicates)
 function parseGridArray(grid) {
     if (!grid || grid.length < 3) return;
 
-    // Fully reset all collections to clear any deleted items
     state.products = [];
     state.maturedList = [];
     state.allRecordsFlat = [];
@@ -695,6 +694,7 @@ function parseGridArray(grid) {
     let accumulatedSavingsFromKPI = 0;
     let maturityTotalFromKPI = 0;
     let parentalTotalFromKPI = 0;
+    let paidCount = 0;
 
     // 1. Scan Top KPI Cards (Lines 0 to 15)
     for (let r = 0; r < Math.min(grid.length, 15); r++) {
@@ -712,137 +712,118 @@ function parseGridArray(grid) {
         }
     }
 
-    // 2. Find Header Row containing Products (Row with "걸음마" or "하나은행")
-    let headerRowIdx = -1;
-    for (let r = 0; r < Math.min(grid.length, 20); r++) {
-        const rowStr = (grid[r] || []).join(' ');
-        if (rowStr.includes('걸음마') || rowStr.includes('하나은행') || rowStr.includes('이율')) {
-            headerRowIdx = r;
-            break;
-        }
-    }
-
-    if (headerRowIdx === -1) return;
-
-    const nameRow = grid[headerRowIdx];
-    const subHeaderRow = grid[headerRowIdx + 1] || [];
-
-    // 3. Detect Product Groups by scanning Month ("월") columns in subHeaderRow
-    const productCols = [];
-    let maturedColStart = -1;
-
-    for (let c = 0; c < subHeaderRow.length; c++) {
-        const subCell = (subHeaderRow[c] || '').toString().trim();
-        const headerCell = (nameRow[c] || '').toString().trim();
-
-        if (headerCell === '종류' || headerCell === '은행' || subCell === '종류' || subCell === '은행' || headerCell.includes('만기적금')) {
-            if (maturedColStart === -1) maturedColStart = c;
-        }
-
-        if (subCell === '월') {
-            let prodName = '';
-            let rateStr = '이율 정보 없음';
-
-            for (let offset = -2; offset <= 3; offset++) {
-                const targetIdx = c + offset;
-                if (targetIdx >= 0 && targetIdx < nameRow.length) {
-                    const candidate = (nameRow[targetIdx] || '').toString().trim();
-                    if (candidate && !candidate.includes('이율') && candidate !== '월' && candidate !== '입금날짜' && candidate !== '금액' && candidate !== '현재날짜') {
-                        if (!prodName) prodName = candidate;
-                    }
-                    if (candidate && candidate.includes('이율')) {
-                        rateStr = candidate;
-                    }
-                }
-            }
-
-            let monthCol = c;
-            let dateCol = c + 1;
-            let amountCol = c + 2;
-
-            if ((subHeaderRow[c + 1] || '').toString().includes('입금날짜')) dateCol = c + 1;
-            if ((subHeaderRow[c + 2] || '').toString().includes('금액')) amountCol = c + 2;
-
-            if (prodName) {
-                productCols.push({
-                    id: `prod_${productCols.length}`,
-                    name: prodName.replace(/이율\([^)]+\)/g, '').trim(),
-                    rate: rateStr,
-                    monthCol, dateCol, amountCol,
-                    records: [],
-                    totalDeposited: 0
-                });
-            }
-        }
-    }
-
-    // 4. Parse Monthly Records
-    let paidCount = 0;
-
-    for (let r = headerRowIdx + 2; r < grid.length; r++) {
+    // 2. Scan ALL header rows containing product titles and subheader "월"
+    for (let r = 0; r < grid.length - 1; r++) {
         const row = grid[r];
-        if (!row || row.length === 0) continue;
+        const subRow = grid[r + 1] || [];
+        if (!row || !subRow) continue;
 
-        productCols.forEach(prod => {
-            const monthVal = (row[prod.monthCol] || '').toString().trim();
-            const dateVal = (row[prod.dateCol] || '').toString().trim();
-            const amountVal = (row[prod.amountCol] || '').toString().trim();
+        for (let c = 0; c < subRow.length; c++) {
+            const subCell = (subRow[c] || '').toString().trim();
+            if (subCell === '월') {
+                let prodName = '';
+                let rateStr = '이율 정보 없음';
 
-            if (monthVal && monthVal !== '총액' && monthVal !== '총역') {
-                const amountNum = parseCurrency(amountVal);
-                let status = 'scheduled';
-
-                // Check if deposit cell was deleted or marked unpaid
-                if (dateVal && dateVal !== '미입금' && amountNum > 0) {
-                    status = 'deposited';
-                    prod.totalDeposited += amountNum;
-                    paidCount++;
-                } else if (dateVal === '미입금' || (monthVal.includes('8월') && !dateVal)) {
-                    status = 'unpaid';
+                for (let offset = -2; offset <= 3; offset++) {
+                    const targetIdx = c + offset;
+                    if (targetIdx >= 0 && targetIdx < row.length) {
+                        const candidate = (row[targetIdx] || '').toString().trim();
+                        if (candidate && !candidate.includes('이율') && candidate !== '월' && candidate !== '입금날짜' && candidate !== '금액' && candidate !== '현재날짜') {
+                            if (!prodName) prodName = candidate;
+                        }
+                        if (candidate && candidate.includes('이율')) {
+                            rateStr = candidate;
+                        }
+                    }
                 }
 
-                const rec = {
-                    id: `rec_${state.allRecordsFlat.length}`,
-                    productName: prod.name,
-                    rate: prod.rate,
-                    month: monthVal,
-                    date: dateVal || '-',
-                    amount: amountNum,
-                    amountFormatted: formatKRW(amountNum),
-                    status
-                };
-                prod.records.push(rec);
-                state.allRecordsFlat.push(rec);
-            }
-        });
+                if (prodName) {
+                    const monthCol = c;
+                    let dateCol = c + 1;
+                    let amountCol = c + 2;
+                    if ((subRow[c + 1] || '').toString().includes('입금날짜') || (subRow[c + 1] || '').toString().includes('받는날짜')) dateCol = c + 1;
+                    if ((subRow[c + 2] || '').toString().includes('금액')) amountCol = c + 2;
 
-        // 5. Parse Matured List Items (Reflects Deletions Immediately)
-        if (maturedColStart !== -1 && row[maturedColStart]) {
-            const typeVal = (row[maturedColStart] || '').toString().trim();
-            const bankVal = (row[maturedColStart + 1] || '').toString().trim();
-            const amountVal = (row[maturedColStart + 2] || '').toString().trim();
-            const amountNum = parseCurrency(amountVal);
+                    const cleanName = prodName.replace(/이율\([^)]+\)/g, '').trim();
 
-            if (typeVal && amountNum > 0 && typeVal !== '종류') {
-                state.maturedList.push({
-                    type: typeVal,
-                    bank: bankVal || '시중은행',
-                    amount: amountNum,
-                    amountFormatted: formatKRW(amountNum)
-                });
+                    let prodObj = state.products.find(p => p.name === cleanName);
+                    if (!prodObj) {
+                        prodObj = {
+                            id: `prod_${state.products.length}`,
+                            name: cleanName,
+                            rate: rateStr,
+                            records: [],
+                            totalDeposited: 0
+                        };
+                        state.products.push(prodObj);
+                    }
+
+                    // Parse monthly rows specifically for this grid block
+                    for (let mr = r + 2; mr < grid.length; mr++) {
+                        const mRow = grid[mr];
+                        if (!mRow) break;
+                        const monthVal = (mRow[monthCol] || '').toString().trim();
+                        const dateVal = (mRow[dateCol] || '').toString().trim();
+                        const amountVal = (mRow[amountCol] || '').toString().trim();
+
+                        if (monthVal === '총액' || monthVal === '총역' || monthVal === '총급여' || monthVal === '월') {
+                            break; // End of this product block
+                        }
+
+                        if (monthVal && monthVal !== '종류' && monthVal !== '현재날짜') {
+                            const amountNum = parseCurrency(amountVal);
+                            let status = 'scheduled';
+
+                            if (dateVal && dateVal !== '미입금' && amountNum > 0) {
+                                status = 'deposited';
+                                prodObj.totalDeposited += amountNum;
+                                paidCount++;
+                            } else if (dateVal === '미입금' || (monthVal.includes('8월') && !dateVal)) {
+                                status = 'unpaid';
+                            }
+
+                            const rec = {
+                                id: `rec_${state.allRecordsFlat.length}`,
+                                productName: prodObj.name,
+                                rate: prodObj.rate,
+                                month: monthVal,
+                                date: dateVal || '-',
+                                amount: amountNum,
+                                amountFormatted: formatKRW(amountNum),
+                                status
+                            };
+                            prodObj.records.push(rec);
+                            state.allRecordsFlat.push(rec);
+                        }
+                    }
+                }
             }
         }
     }
 
-    state.products = productCols;
+    // 3. Scan Matured Deposits List Items
+    for (let r = 0; r < grid.length; r++) {
+        const row = grid[r];
+        if (!row) continue;
+        for (let c = 0; c < row.length - 2; c++) {
+            const cell = (row[c] || '').toString().trim();
+            if (cell.includes('만기적금') || cell.includes('예금만기') || cell.includes('청년도약계좌')) {
+                const bankVal = (row[c + 1] || '').toString().trim();
+                const amountVal = (row[c + 2] || '').toString().trim();
+                const amountNum = parseCurrency(amountVal);
+                if (amountNum > 0) {
+                    state.maturedList.push({
+                        type: cell,
+                        bank: bankVal || '시중은행',
+                        amount: amountNum,
+                        amountFormatted: formatKRW(amountNum)
+                    });
+                }
+            }
+        }
+    }
 
-    // Recalculate totalDeposited for products based on actual deposited records
-    state.products.forEach(p => {
-        const depositedSum = p.records.filter(r => r.status === 'deposited').reduce((sum, r) => sum + r.amount, 0);
-        p.totalDeposited = depositedSum;
-    });
-
-    // Merge ALL products from savingsMasterList (적금리스트 탭) into state.products
+    // 4. Merge ALL products from savingsMasterList
     const masterListToMerge = state.savingsMasterList.length > 0 ? state.savingsMasterList : SAVINGS_MASTER_FALLBACK;
     masterListToMerge.forEach(masterItem => {
         let existing = state.products.find(p => p.name.includes(masterItem.name) || masterItem.name.includes(p.name));
