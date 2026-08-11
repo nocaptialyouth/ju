@@ -101,44 +101,108 @@ body {
 .sys-nav {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
-    background: rgba(0, 0, 0, 0.3);
-    padding: 0.3rem;
+    gap: 0.4rem;
+    background: rgba(15, 23, 42, 0.85);
+    padding: 0.35rem 0.5rem;
     border-radius: var(--radius-md);
-    border: 1px solid var(--border-color);
+    border: 1.5px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
 
 .nav-tab {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #f1f5f9;
     padding: 0.55rem 1.1rem;
     border-radius: var(--radius-sm);
-    font-size: 0.85rem;
-    font-weight: 600;
+    font-size: 0.88rem;
+    font-weight: 700;
     cursor: pointer;
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    transition: var(--transition);
+    transition: all 0.2s ease;
+    white-space: nowrap;
 }
 
 .nav-tab:hover {
-    color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.05);
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.25);
+    transform: translateY(-1px);
 }
 
-.nav-tab.active {
-    background: #1e2d4a;
-    color: #fff;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-    border-bottom: 2px solid var(--accent-teal);
+/* Individual High-Contrast Colorful Badges for Navigation Tabs */
+.nav-tab[data-tab="dashboard"] {
+    background: rgba(56, 189, 248, 0.2) !important;
+    border: 1px solid rgba(56, 189, 248, 0.5) !important;
+    color: #7dd3fc !important;
+}
+.nav-tab[data-tab="dashboard"].active {
+    background: #0284c7 !important;
+    color: #ffffff !important;
+    border-color: #38bdf8 !important;
+    box-shadow: 0 4px 14px rgba(2, 132, 199, 0.5) !important;
 }
 
-.nav-tab-highlight {
-    background: rgba(0, 168, 132, 0.15);
-    border: 1px solid rgba(0, 168, 132, 0.3);
-    color: #2dd4bf;
+.nav-tab[data-tab="savings-ledger"] {
+    background: rgba(192, 132, 252, 0.2) !important;
+    border: 1px solid rgba(192, 132, 252, 0.5) !important;
+    color: #e9d5ff !important;
+}
+.nav-tab[data-tab="savings-ledger"].active {
+    background: #8b5cf6 !important;
+    color: #ffffff !important;
+    border-color: #c084fc !important;
+    box-shadow: 0 4px 14px rgba(139, 92, 246, 0.5) !important;
+}
+
+.nav-tab[data-tab="maturity-master"] {
+    background: rgba(251, 191, 36, 0.2) !important;
+    border: 1px solid rgba(251, 191, 36, 0.5) !important;
+    color: #fde68a !important;
+}
+.nav-tab[data-tab="maturity-master"].active {
+    background: #f59e0b !important;
+    color: #0f172a !important;
+    border-color: #fbbf24 !important;
+    font-weight: 800 !important;
+    box-shadow: 0 4px 14px rgba(245, 158, 11, 0.5) !important;
+}
+
+.nav-tab[data-tab="baby-milestones"] {
+    background: rgba(52, 211, 153, 0.2) !important;
+    border: 1px solid rgba(52, 211, 153, 0.5) !important;
+    color: #a7f3d0 !important;
+}
+.nav-tab[data-tab="baby-milestones"].active {
+    background: #10b981 !important;
+    color: #ffffff !important;
+    border-color: #34d399 !important;
+    box-shadow: 0 4px 14px rgba(16, 185, 129, 0.5) !important;
+}
+
+.nav-tab[data-tab="hospital-expenses"] {
+    background: rgba(248, 113, 113, 0.2) !important;
+    border: 1px solid rgba(248, 113, 113, 0.5) !important;
+    color: #fecaca !important;
+}
+.nav-tab[data-tab="hospital-expenses"].active {
+    background: #ef4444 !important;
+    color: #ffffff !important;
+    border-color: #f87171 !important;
+    box-shadow: 0 4px 14px rgba(239, 68, 68, 0.5) !important;
+}
+
+.nav-tab[data-tab="gsheet-settings"] {
+    background: rgba(45, 212, 191, 0.2) !important;
+    border: 1px solid rgba(45, 212, 191, 0.5) !important;
+    color: #99f6e4 !important;
+}
+.nav-tab[data-tab="gsheet-settings"].active {
+    background: #0d9488 !important;
+    color: #ffffff !important;
+    border-color: #2dd4bf !important;
+    box-shadow: 0 4px 14px rgba(13, 148, 136, 0.5) !important;
 }
 
 .sys-user-bar {
