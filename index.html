@@ -179,6 +179,37 @@
                         </div>
                     </div>
 
+                    <!-- Baby & High-Yield Savings Recommendation Card -->
+                    <div class="card recommend-card">
+                        <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+                            <h3><i class="fa-solid fa-baby-carriage" style="color:#f43f5e;"></i> 2026 맞춤 추천 적금</h3>
+                            <button class="btn btn-outline btn-sm" id="btn-refresh-recommend" title="매일 자동 갱신되는 추천 적금 새로고침" style="font-size:0.75rem; padding:0.25rem 0.55rem;">
+                                <i class="fa-solid fa-arrows-rotate"></i> 갱신
+                            </button>
+                        </div>
+
+                        <!-- Baby Birth Info Badge -->
+                        <div style="background:rgba(244, 63, 94, 0.08); border:1px solid rgba(244, 63, 94, 0.2); padding:0.5rem 0.75rem; border-radius:var(--radius-sm); margin-bottom:0.85rem; font-size:0.8rem; color:#f43f5e; display:flex; justify-content:space-between; align-items:center;">
+                            <span>👶 아기 생일: <strong>2026년 7월 18일</strong></span>
+                            <span class="badge-emerald" style="font-size:0.75rem;">출산 우대 특판 대상</span>
+                        </div>
+
+                        <!-- Category Selector Tabs -->
+                        <div class="recommend-tab-bar" style="display:flex; gap:0.35rem; margin-bottom:0.85rem;">
+                            <button class="btn btn-teal btn-sm active" id="rec-tab-baby" onclick="switchRecommendCategory('baby')" style="flex:1; font-size:0.78rem; font-weight:700;">
+                                👶 출산/아기 특판 (5종)
+                            </button>
+                            <button class="btn btn-outline btn-sm" id="rec-tab-high" onclick="switchRecommendCategory('high')" style="flex:1; font-size:0.78rem; font-weight:700;">
+                                🔥 2026 고금리 (5종)
+                            </button>
+                        </div>
+
+                        <!-- Dynamic Recommendation Items Container -->
+                        <div class="recommend-list" id="recommend-list">
+                            <!-- Dynamic injected recommendations -->
+                        </div>
+                    </div>
+
                     <!-- Interactive Calendar & Memo Card (Image 2 & 3 Match) -->
                     <div class="card calendar-card">
                         <div class="calendar-header">

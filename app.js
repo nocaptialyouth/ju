@@ -27,6 +27,10 @@ const state = {
     },
     db: null,
 
+    // Recommendation Widget State
+    recCategory: 'baby',
+    recSeed: 0,
+
     // Multi-Tab Data Collections
     savingsMasterList: [],
     hospitalExpenses: [],
@@ -380,6 +384,15 @@ function setupEventListeners() {
         elements.btnExportHospExcel.addEventListener('click', () => exportToCSV('Juwon_Hospital_Care_Expenses.csv', prepareHospitalCSVData()));
     }
 
+    const btnRefreshRec = document.getElementById('btn-refresh-recommend');
+    if (btnRefreshRec) {
+        btnRefreshRec.addEventListener('click', () => {
+            state.recSeed++;
+            renderRecommendations();
+            showToast('🔄 2026 추천 적금 목록이 새롭게 갱신되었습니다!', 'info');
+        });
+    }
+
     elements.btnOpenDepositModal.addEventListener('click', () => {
         populateProductSelect();
         elements.depositModal.classList.add('active');
@@ -546,6 +559,71 @@ const PRODUCT_EPISODES = {
     "새마을금고예금": 1,
     "부산기쁨두배통장": 36
 };
+
+const BABY_RECOMMENDATIONS = [
+    { name: "새마을금고 용용적금/걸음마 특판", rate: "최고 10.0%", desc: "2026년 출생아 우대 최고 연 10.0% 출생축하 우대금리", query: "새마을금고+용용적금+걸음마적금" },
+    { name: "하나은행 아이키움 적금", rate: "최고 5.0%", desc: "양육수당/아기 수당 수령 시 우대 금리 혜택", query: "하나은행+아이키움적금" },
+    { name: "KB국민 아이사랑 적금", rate: "최고 6.5%", desc: "미성년 아기 명의 가입 시 출생 우대금리 최고 6.5%", query: "KB국민은행+아이사랑적금" },
+    { name: "신한은행 아기드림 적금", rate: "최고 5.5%", desc: "영유아 전용 우대금리 및 첫 만기 축하금 지원", query: "신한은행+아이드림적금" },
+    { name: "카카오뱅크 26주 아이적금", rate: "최고 5.0%", desc: "매주 자동이체 성공 시 단계별 우대금리 5.0%", query: "카카오뱅크+26주적금" },
+    { name: "우리은행 우리아이 처음적금", rate: "최고 5.5%", desc: "아기 첫 통장 개설 우대쿠폰 1만원 추가 혜택", query: "우리은행+우리아이처음적금" },
+    { name: "농협은행 아이행복 적금", rate: "최고 4.8%", desc: "아기 출생 증명서 제출 시 우대 금리 즉시 적용", query: "NH농협+아이행복적금" }
+];
+
+const HIGH_YIELD_RECOMMENDATIONS = [
+    { name: "IBK기업은행 청년미래/도약 적금", rate: "최고 6.0%", desc: "정부 연계 청년 저축계좌 일반형 연 6.0%", query: "IBK+청년미래적금" },
+    { name: "신한은행 SOL 너만SOLO 적금", rate: "최고 6.0%", desc: "약정 납입 달성 시 최고 연 6.0% 우대 적금", query: "신한은행+너만SOLO적금" },
+    { name: "토스뱅크 굴비적금", rate: "최고 4.3%", desc: "굴비 저금 시 매달 자동 우대 이율 반영 최고 연 4.3%", query: "토스뱅크+굴비적금" },
+    { name: "부산은행 기쁨두배 통장", rate: "1+1 원금매칭", desc: "부산시 청년 지원 1+1 원금 매칭 및 이자 혜택", query: "부산은행+기쁨두배통장" },
+    { name: "새마을금고 2000만원 정기예금", rate: "연 4.0%", desc: "확정 금리 4.0% 비과세 활용 정기예금", query: "새마을금고+정기예금+금리" },
+    { name: "K뱅크 챌린지 적금", rate: "최고 7.0%", desc: "매일 저축 챌린지 성공 시 최고 연 7.0% 적용", query: "케이뱅크+챌린지적금" },
+    { name: "전북은행 JB 퍼스트 적금", rate: "최고 8.0%", desc: "첫 거래 고객 전용 특판 고금리 연 8.0%", query: "전북은행+JB퍼스트적금" }
+];
+
+window.switchRecommendCategory = function(cat) {
+    state.recCategory = cat;
+    const babyTab = document.getElementById('rec-tab-baby');
+    const highTab = document.getElementById('rec-tab-high');
+    if (babyTab && highTab) {
+        if (cat === 'baby') {
+            babyTab.className = "btn btn-teal btn-sm active";
+            highTab.className = "btn btn-outline btn-sm";
+        } else {
+            babyTab.className = "btn btn-outline btn-sm";
+            highTab.className = "btn btn-teal btn-sm active";
+        }
+    }
+    renderRecommendations();
+};
+
+function renderRecommendations() {
+    const listContainer = document.getElementById('recommend-list');
+    if (!listContainer) return;
+
+    const sourceList = state.recCategory === 'high' ? HIGH_YIELD_RECOMMENDATIONS : BABY_RECOMMENDATIONS;
+    const dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / (1000 * 60 * 60 * 24));
+    const offset = (dayOfYear + state.recSeed) % sourceList.length;
+
+    const displayItems = [];
+    for (let i = 0; i < 5; i++) {
+        displayItems.push(sourceList[(offset + i) % sourceList.length]);
+    }
+
+    listContainer.innerHTML = displayItems.map(item => `
+        <div class="recommend-item" style="padding:0.6rem 0; border-bottom:1px dashed var(--border-color); display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
+            <div style="flex:1;">
+                <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; margin-bottom:0.15rem;">
+                    <strong style="font-size:0.86rem; color:var(--text-primary);">${escapeHTML(item.name)}</strong>
+                    <span class="rate-badge" style="font-size:0.72rem; padding:0.1rem 0.4rem; background:#ccfbf1; color:#0f766e;"><i class="fa-solid fa-percent"></i> ${escapeHTML(item.rate)}</span>
+                </div>
+                <div style="font-size:0.75rem; color:var(--text-secondary); line-height:1.3;">${escapeHTML(item.desc)}</div>
+            </div>
+            <a href="https://search.naver.com/search.naver?query=${encodeURIComponent(item.query)}" target="_blank" rel="noopener noreferrer" class="btn btn-teal btn-sm" style="font-size:0.75rem; padding:0.3rem 0.6rem; white-space:nowrap; text-decoration:none;">
+                <i class="fa-solid fa-arrow-up-right-from-square"></i> 조회
+            </a>
+        </div>
+    `).join('');
+}
 
 function getBankLink(name) {
     if (!name) return "https://search.naver.com/search.naver?query=적금+추천";
@@ -958,6 +1036,7 @@ function renderDashboard() {
 
     renderProductsGrid();
     renderMaturedList();
+    renderRecommendations();
 }
 
 function renderProductsGrid() {
