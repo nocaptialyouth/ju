@@ -1969,3 +1969,54 @@ window.rejectUser = function(email) {
     renderAdminApprovalList();
     showToast(`❌ ${email} 계정이 거절/삭제되었습니다.`, 'info');
 };
+
+/* Password Change Handler */
+window.openChangePasswordModal = function() {
+    if (!currentUser) {
+        showToast('로그인이 필요한 서비스입니다.', 'warning');
+        return;
+    }
+    const modal = document.getElementById('change-password-modal');
+    if (modal) modal.classList.add('active');
+};
+
+window.handlePasswordChangeSubmit = function(e) {
+    e.preventDefault();
+    if (!currentUser) return;
+
+    const currentPwd = document.getElementById('pwd-current').value.trim();
+    const newPwd = document.getElementById('pwd-new').value.trim();
+    const confirmPwd = document.getElementById('pwd-confirm').value.trim();
+
+    const userAcc = userAccounts.find(u => u.email.toLowerCase() === currentUser.email.toLowerCase());
+    const validCurrent = (userAcc && userAcc.password === currentPwd) || (currentUser.email === MASTER_EMAIL && (currentPwd === 'admin' || (userAcc && userAcc.password === currentPwd)));
+
+    if (!validCurrent) {
+        showToast('현재 비밀번호가 일치하지 않습니다.', 'warning');
+        return;
+    }
+
+    if (newPwd.length < 3) {
+        showToast('새 비밀번호는 3자리 이상 입력해 주세요.', 'warning');
+        return;
+    }
+
+    if (newPwd !== confirmPwd) {
+        showToast('새 비밀번호와 비밀번호 확인이 일치하지 않습니다.', 'warning');
+        return;
+    }
+
+    if (userAcc) {
+        userAcc.password = newPwd;
+    } else {
+        userAccounts.push({ email: currentUser.email, password: newPwd, name: currentUser.name, role: currentUser.role, approved: true, date: "2026-08-11" });
+    }
+
+    localStorage.setItem('juwon_user_accounts', JSON.stringify(userAccounts));
+    currentUser.password = newPwd;
+    localStorage.setItem('juwon_current_user', JSON.stringify(currentUser));
+
+    showToast(`🔑 ${currentUser.email} 계정 비밀번호가 성공적으로 변경되었습니다!`, 'success');
+    closeAllModals();
+    e.target.reset();
+};
