@@ -1698,6 +1698,15 @@ function renderAIGuardianInsights() {
                 조리원비 100만원 + 병원비 87.6만원 환불 서류 보건소 제출 대기 중! <strong>총 ₩1,376,900 환불 완료 추적 중</strong>.
             </div>
         </div>
+
+        <div style="background:rgba(56, 189, 248, 0.12); padding:0.85rem 1rem; border-radius:var(--radius-sm); border:1px solid rgba(56, 189, 248, 0.35);">
+            <div style="display:flex; align-items:center; gap:0.4rem; color:#38bdf8; font-weight:700; font-size:0.85rem; margin-bottom:0.3rem;">
+                <i class="fa-solid fa-chart-line"></i> [ISA 중개형 AI 자동화] 한국투자증권 월 10만원
+            </div>
+            <div style="font-size:0.8rem; color:#e2e8f0; line-height:1.4;">
+                S&P500(5만)+SCHD(3만)+월배당(2만) 분할 적립 시 <strong>비과세 200만원 혜택 100% 챙기기 가이드</strong> 완비!
+            </div>
+        </div>
     `;
 }
 
