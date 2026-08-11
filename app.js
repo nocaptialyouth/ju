@@ -1043,6 +1043,19 @@ function renderMaturedList() {
     `).join('');
 }
 
+function formatStandardDateKey(str) {
+    if (!str || str === '-') return '';
+    const clean = str.replace(/\./g, '-').replace(/\s+/g, '').replace(/\//g, '-');
+    const parts = clean.split('-').filter(Boolean);
+    if (parts.length === 3) {
+        const y = parts[0];
+        const m = String(parts[1]).padStart(2, '0');
+        const d = String(parts[2]).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    return str;
+}
+
 // Render Calendar
 function renderCalendar() {
     const year = state.calCurrentDate.getFullYear();
@@ -1065,15 +1078,18 @@ function renderCalendar() {
         const dayStr = String(day).padStart(2, '0');
         const fullDateStr = `${year}-${monthStr}-${dayStr}`;
 
-        const isToday = fullDateStr === "2026-08-07";
+        const isToday = fullDateStr === "2026-08-07" || fullDateStr === "2026-08-11";
         const isSelected = fullDateStr === state.calSelectedDateStr;
-        const hasEvent = state.memos.some(m => m.date === fullDateStr);
+        
+        const hasManualMemo = state.memos.some(m => formatStandardDateKey(m.date) === fullDateStr);
+        const hasDepositRecord = state.allRecordsFlat.some(r => r.status === 'deposited' && formatStandardDateKey(r.date) === fullDateStr);
+        const hasEvent = hasManualMemo || hasDepositRecord;
 
         html += `
             <div class="cal-day-cell ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}" 
                  onclick="selectCalendarDate('${fullDateStr}')">
                 ${day}
-                ${hasEvent ? '<span class="event-dot"></span>' : ''}
+                ${hasEvent ? `<span class="event-dot" style="background:${hasDepositRecord ? '#10b981' : '#f59e0b'};"></span>` : ''}
             </div>
         `;
     }
@@ -1095,20 +1111,33 @@ function renderDailyNotes() {
 
     elements.selectedDateDisplay.innerText = `${y}년 ${m}월 ${d}일 ${dayName}요일`;
 
-    const dayMemos = state.memos.filter(memo => memo.date === state.calSelectedDateStr);
+    const dayMemos = state.memos.filter(memo => formatStandardDateKey(memo.date) === state.calSelectedDateStr);
 
-    if (dayMemos.length === 0) {
-        elements.dailyNotesList.innerHTML = `<p style="color:var(--text-muted); font-size:0.8rem; padding:0.5rem 0;">등록된 일정이나 메모가 없습니다.</p>`;
+    const autoDeposits = state.allRecordsFlat.filter(r => r.status === 'deposited' && formatStandardDateKey(r.date) === state.calSelectedDateStr);
+
+    const autoDepositMemos = autoDeposits.map(r => ({
+        category: '적금입금',
+        time: '10:00',
+        content: `✅ [입금완료] ${r.productName} ${r.month} (${r.amountFormatted}) 정상 입금 확인`,
+        isAuto: true
+    }));
+
+    const combined = [...autoDepositMemos, ...dayMemos];
+
+    if (combined.length === 0) {
+        elements.dailyNotesList.innerHTML = `<p style="color:var(--text-muted); font-size:0.8rem; padding:0.5rem 0;">등록된 일정이나 입금 내역이 없습니다.</p>`;
         return;
     }
 
-    elements.dailyNotesList.innerHTML = dayMemos.map(m => `
-        <div class="note-item-card">
+    elements.dailyNotesList.innerHTML = combined.map(m => `
+        <div class="note-item-card" style="${m.isAuto ? 'border-left-color: #10b981; background: rgba(16, 185, 129, 0.15);' : ''}">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span class="note-cat-tag ${escapeHTML(m.category)}">${escapeHTML(m.category)}</span>
+                <span class="note-cat-tag ${escapeHTML(m.category)}" style="${m.isAuto ? 'background: rgba(16, 185, 129, 0.25); color: #34d399;' : ''}">
+                    ${m.isAuto ? '<i class="fa-solid fa-circle-check"></i> ' : ''}${escapeHTML(m.category)}
+                </span>
                 <span class="note-time">${escapeHTML(m.time)}</span>
             </div>
-            <div class="note-text">${escapeHTML(m.content)}</div>
+            <div class="note-text" style="${m.isAuto ? 'font-weight:700; color:#f1f5f9;' : ''}">${escapeHTML(m.content)}</div>
         </div>
     `).join('');
 }
