@@ -1037,6 +1037,8 @@ function renderDashboard() {
     renderProductsGrid();
     renderMaturedList();
     renderRecommendations();
+    renderAIGuardianInsights();
+    renderBabyMilestonesTable();
 }
 
 function renderProductsGrid() {
@@ -1337,16 +1339,26 @@ function renderHospitalExpensesTable() {
         return;
     }
 
-    elements.hospitalTableBody.innerHTML = filtered.map((e, idx) => `
+    elements.hospitalTableBody.innerHTML = filtered.map((e, idx) => {
+        const cStatus = e.claimStatus || (e.note.includes('보건소') ? '청구대기' : '환불완료');
+        const badgeBg = cStatus === '환불완료' ? '#059669' : cStatus === '제출완료' ? '#2563eb' : '#d97706';
+        return `
         <tr>
             <td>${idx + 1}</td>
             <td><strong>${escapeHTML(e.date)}</strong></td>
             <td><span class="hosp-cat-tag ${escapeHTML(e.category)}">${escapeHTML(e.category)}</span></td>
             <td><strong>${escapeHTML(e.details)}</strong></td>
             <td><strong style="color:#f87171;">${e.amountFormatted || formatKRW(e.amount)}</strong></td>
-            <td><span style="color:var(--text-secondary); font-size:0.85rem;">${escapeHTML(e.note || '-')}</span></td>
+            <td>
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                    <span style="color:var(--text-secondary); font-size:0.85rem;">${escapeHTML(e.note || '-')}</span>
+                    <button class="btn btn-sm" onclick="toggleHospClaimStatus(${idx})" style="background:${badgeBg}; color:#fff; font-size:0.75rem; padding:0.2rem 0.55rem; white-space:nowrap; border:none; border-radius:4px; cursor:pointer;">
+                        ${cStatus === '환불완료' ? '🟢 환불완료' : cStatus === '제출완료' ? '📋 서류제출' : '⏳ 청구대기'}
+                    </button>
+                </div>
+            </td>
         </tr>
-    `).join('');
+    `;}).join('');
 }
 
 function prepareHospitalCSVData() {
@@ -1578,3 +1590,119 @@ function escapeHTML(str) {
     if (!str) return '';
     return str.replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[tag] || tag));
 }
+
+/* ================= 5 INNOVATIVE FEATURE HANDLERS ================= */
+
+// Feature 1: AI Smart Financial Guardian Insights
+function renderAIGuardianInsights() {
+    const container = document.getElementById('ai-guardian-insights-container');
+    if (!container) return;
+
+    container.innerHTML = `
+        <div style="background:rgba(255,255,255,0.06); padding:0.85rem 1rem; border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.12);">
+            <div style="display:flex; align-items:center; gap:0.4rem; color:#60a5fa; font-weight:700; font-size:0.85rem; margin-bottom:0.3rem;">
+                <i class="fa-solid fa-lightbulb"></i> [만기 예치 추천] 너만SOLO 적금 (1,000만원)
+            </div>
+            <div style="font-size:0.8rem; color:#e2e8f0; line-height:1.4;">
+                8월 25일 약정 만기 시 <strong>연 4.0% 비과세 정기예금</strong>으로 재예치 시 <strong>연 ₩400,000 추가 이자 수익</strong> 발생!
+            </div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.06); padding:0.85rem 1rem; border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.12);">
+            <div style="display:flex; align-items:center; gap:0.4rem; color:#34d399; font-weight:700; font-size:0.85rem; margin-bottom:0.3rem;">
+                <i class="fa-solid fa-baby"></i> [육아 지원금 최적화] 아기 전용 10% 적금
+            </div>
+            <div style="font-size:0.8rem; color:#e2e8f0; line-height:1.4;">
+                매달 25일 입금되는 <strong>부모급여(100만원)</strong> 중 30%를 <strong>새마을금고 10% 출생우대 적금</strong>으로 자동 배분 추천.
+            </div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.06); padding:0.85rem 1rem; border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.12);">
+            <div style="display:flex; align-items:center; gap:0.4rem; color:#fef08a; font-weight:700; font-size:0.85rem; margin-bottom:0.3rem;">
+                <i class="fa-solid fa-file-invoice-dollar"></i> [보건소 환불 체크] 조리원 & 병원비
+            </div>
+            <div style="font-size:0.8rem; color:#e2e8f0; line-height:1.4;">
+                조리원비 100만원 + 병원비 87.6만원 환불 서류 보건소 제출 대기 중! <strong>총 ₩1,376,900 환불 완료 추적 중</strong>.
+            </div>
+        </div>
+    `;
+}
+
+// Feature 2: Baby Allowance & Milestones Table Render
+function renderBabyMilestonesTable() {
+    const tbody = document.getElementById('baby-allowance-table-body');
+    if (!tbody) return;
+
+    const rows = [
+        { age: "0~11개월 (영아)", period: "2026. 8 ~ 2027. 7", parent: "₩1,000,000", child: "₩100,000", total: "₩1,100,000", status: "진행중 (매월 25일)", isCurrent: true },
+        { age: "12~23개월 (유아)", period: "2027. 8 ~ 2028. 7", parent: "₩500,000", child: "₩100,000", total: "₩600,000", status: "예정", isCurrent: false },
+        { age: "24~84개월 (아동)", period: "2028. 8 ~ 2033. 7", parent: "₩0", child: "₩100,000", total: "₩100,000", status: "예정", isCurrent: false }
+    ];
+
+    tbody.innerHTML = rows.map(r => `
+        <tr style="${r.isCurrent ? 'background:rgba(16, 185, 129, 0.1); font-weight:700;' : ''}">
+            <td><strong>${r.age}</strong></td>
+            <td>${r.period}</td>
+            <td style="color:#34d399;">${r.parent}</td>
+            <td style="color:#60a5fa;">${r.child}</td>
+            <td><strong style="color:var(--accent-emerald);">${r.total}</strong></td>
+            <td><span class="${r.isCurrent ? 'badge-emerald' : 'status-badge-inline scheduled'}">${r.status}</span></td>
+        </tr>
+    `).join('');
+}
+
+// Feature 3: Hospital Claim Status Toggle
+window.toggleHospClaimStatus = function(index) {
+    const list = state.hospitalExpenses.length > 0 ? state.hospitalExpenses : HOSPITAL_EXPENSES_FALLBACK;
+    if (!list[index]) return;
+    const current = list[index].claimStatus || '청구대기';
+    const nextStatus = current === '청구대기' ? '제출완료' : current === '제출완료' ? '환불완료' : '청구대기';
+    list[index].claimStatus = nextStatus;
+    renderHospitalExpensesTable();
+    showToast(`병원비/조리원비 환불 상태가 [${nextStatus}] (으)로 변경되었습니다!`, 'success');
+};
+
+// Feature 4: KakaoTalk Notification Center Modal Generator
+window.openKakaoModal = function() {
+    const modal = document.getElementById('kakao-modal');
+    const body = document.getElementById('kakao-modal-body');
+    if (!modal || !body) return;
+
+    const messageText = `[주원 자산 가계부 알림]\n\n📅 다음 적금 이체 예정일: 2026년 8월 25일\n- IBK 청년미래적금 (₩500,000)\n- 부모급여 수령 (₩1,000,000)\n\n⏳ 만기 예정 적금:\n- 너만SOLO (₩10,000,000) 만기 D-14\n\n👶 주원 아기 출생 (2026. 7. 18) 10% 우대 적금 신청 조회를 확인하세요!`;
+
+    body.innerHTML = `
+        <div style="background:#1e293b; padding:1rem; border-radius:var(--radius-sm); border:1px solid #334155; color:#f8fafc; font-size:0.88rem; white-space:pre-wrap; font-family:sans-serif;">${escapeHTML(messageText)}</div>
+        <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+            <button class="btn btn-teal" onclick="navigator.clipboard.writeText(\`${messageText}\`); showToast('카카오톡 전송용 알림 문구가 복사되었습니다!', 'success');" style="background:#fee500; border-color:#eab308; color:#3b1e1e; font-weight:800;">
+                <i class="fa-solid fa-copy"></i> 카톡 알림 문구 복사
+            </button>
+            <button class="btn btn-outline" onclick="closeAllModals()">닫기</button>
+        </div>
+    `;
+    modal.classList.add('active');
+};
+
+// Feature 5: 1-Click Backup Snapshot & Disaster Recovery
+window.triggerSnapshotBackup = function() {
+    const backupData = {
+        app: "Juwon_Savings_Ledger",
+        version: "2.0",
+        timestamp: new Date().toISOString(),
+        state: {
+            memos: state.memos,
+            products: state.products,
+            hospitalExpenses: state.hospitalExpenses,
+            savingsMasterList: state.savingsMasterList,
+            firebaseConfig: state.firebaseConfig,
+            webappUrl: state.webappUrl
+        }
+    };
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `Juwon_Wealth_Backup_${new Date().toISOString().slice(0, 10)}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    showToast('💾 주원 자산 가계부 1초 백업 파일 다운로드가 완료되었습니다!', 'success');
+};

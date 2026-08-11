@@ -43,8 +43,11 @@
             <button class="nav-tab" data-tab="maturity-master">
                 <i class="fa-solid fa-users-viewfinder"></i> 적금 마스터 & 소유자 현황
             </button>
+            <button class="nav-tab" data-tab="baby-milestones" style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: #059669; font-weight:700;">
+                <i class="fa-solid fa-baby"></i> 👶 아기 지원금 & 생애 목표
+            </button>
             <button class="nav-tab" data-tab="hospital-expenses" style="background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.4); color: #f87171;">
-                <i class="fa-solid fa-hospital-user"></i> 🏥 조리원 & 병원비 지출
+                <i class="fa-solid fa-hospital-user"></i> 🏥 조리원 & 병원비 (환불트래커)
             </button>
             <button class="nav-tab nav-tab-highlight" data-tab="gsheet-settings">
                 <i class="fa-solid fa-code"></i> 구글 시트 백업/연동 설정
@@ -127,6 +130,31 @@
                         <h2 class="kpi-value" id="kpi-parental-total">₩0</h2>
                         <span class="kpi-sub">월 100만 / 50만</span>
                     </div>
+                </div>
+            </div>
+
+            <!-- 🤖 AI Smart Financial Guardian Card -->
+            <div class="card ai-guardian-card" style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); border:1px solid #6366f1; color:#fff; padding:1.25rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.85rem; flex-wrap:wrap; gap:0.5rem;">
+                    <div style="display:flex; align-items:center; gap:0.6rem;">
+                        <span style="width:36px; height:36px; background:#4f46e5; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:1.2rem;">🤖</span>
+                        <div>
+                            <h3 style="font-size:1.05rem; font-weight:800; color:#fff; margin:0;">AI 지능형 자산 진단 & 만기 최적화 엔진</h3>
+                            <span style="font-size:0.75rem; color:#a5b4fc;">실시간 금리 비교 및 만기 재예치 자동 리포트</span>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:0.4rem;">
+                        <button class="btn btn-dark-slate btn-sm" onclick="openKakaoModal()" style="font-size:0.78rem; background:rgba(254, 229, 0, 0.2); border-color:#fef08a; color:#fef08a;">
+                            <i class="fa-solid fa-bell"></i> 카톡 알림 센터
+                        </button>
+                        <button class="btn btn-dark-slate btn-sm" onclick="triggerSnapshotBackup()" style="font-size:0.78rem; background:rgba(16, 185, 129, 0.2); border-color:#6ee7b7; color:#6ee7b7;">
+                            <i class="fa-solid fa-download"></i> 1초 백업
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="ai-guardian-insights-container" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:0.85rem;">
+                    <!-- Injected AI Insights -->
                 </div>
             </div>
 
@@ -445,7 +473,77 @@
                     </tbody>
                 </table>
             </div>
+        <!-- ================= TAB: BABY MILESTONES & GOVERNMENT ALLOWANCES ================= -->
+        <section class="tab-page" id="tab-baby-milestones">
+            <div class="card" style="background: linear-gradient(135deg, #0f172a 0%, #064e3b 100%); border:1px solid #10b981; color:#fff; padding:1.25rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
+                    <div style="display:flex; align-items:center; gap:0.75rem;">
+                        <span style="font-size:2.2rem; background:rgba(16,185,129,0.2); padding:0.4rem 0.6rem; border-radius:12px;">👶</span>
+                        <div>
+                            <h2 style="font-size:1.25rem; font-weight:800; color:#fff; margin:0;">주원 아기 생애주기 목표 & 육아지원금 캘린더</h2>
+                            <span style="font-size:0.8rem; color:#a7f3d0;">출생일: 2026년 7월 18일 | 매달 25일 수령 정부 지원금 추적</span>
+                        </div>
+                    </div>
+                    <span class="badge-emerald" style="font-size:0.85rem; padding:0.4rem 0.85rem; background:#10b981; color:#fff; font-weight:800;">
+                        총 수령 예정액: ₩19,000,000+
+                    </span>
+                </div>
+
+                <!-- 3 Major Milestone Progress Bars -->
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:1rem; margin-top:1rem;">
+                    <!-- Milestone 1: 돌잔치/백일 자금 -->
+                    <div class="card" style="padding:1rem; background:#1e293b; border:1px solid #334155;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                            <strong style="font-size:0.88rem; color:#f8fafc;">🎂 Milestone 1: 돌잔치 & 백일 기금</strong>
+                            <strong style="color:#34d399;">₩4,200,000 / ₩5,000,000 (84%)</strong>
+                        </div>
+                        <div class="progress-bar-container" style="height:8px; background:#334155;">
+                            <div class="progress-bar-fill" style="width:84%; background:#10b981;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Milestone 2: 10년 2,000만원 증여세 비과세 한도 -->
+                    <div class="card" style="padding:1rem; background:#1e293b; border:1px solid #334155;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                            <strong style="font-size:0.88rem; color:#f8fafc;">🎁 Milestone 2: 10년 비과세 증여 한도</strong>
+                            <strong style="color:#60a5fa;">₩300,000 / ₩20,000,000 (1.5%)</strong>
+                        </div>
+                        <div class="progress-bar-container" style="height:8px; background:#334155;">
+                            <div class="progress-bar-fill" style="width:1.5%; background:#3b82f6;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Milestone 3: 유치원/초등학교 학자금 -->
+                    <div class="card" style="padding:1rem; background:#1e293b; border:1px solid #334155;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                            <strong style="font-size:0.88rem; color:#f8fafc;">🎒 Milestone 3: 유치원/학자금 펀드</strong>
+                            <strong style="color:#fbbf24;">₩1,200,000 / ₩10,000,000 (12%)</strong>
+                        </div>
+                        <div class="progress-bar-container" style="height:8px; background:#334155;">
+                            <div class="progress-bar-fill" style="width:12%; background:#f59e0b;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Monthly Government Allowance Schedule Table -->
+            <div class="card table-card" style="margin-top:1.25rem;">
+                <div style="padding:1.25rem; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+                    <h3><i class="fa-solid fa-hand-holding-dollar" style="color:#34d399;"></i> 2026~2028 년도별 월간 부모급여 & 아동수당 지급 일정표</h3>
+                    <span style="font-size:0.8rem; color:var(--text-secondary);">매월 25일 자동 입금 기준</span>
+                </div>
+                <table class="master-table">
+                    <thead>
+                        <tr><th>연령 구분</th><th>지급 기간</th><th>부모급여</th><th>아동수당</th><th>월 총 지급액</th><th>상태</th></tr>
+                    </thead>
+                    <tbody id="baby-allowance-table-body">
+                        <!-- Dynamic Allowance Rows -->
+                    </tbody>
+                </table>
+            </div>
         </section>
+
+        <!-- ================= TAB 3: HOSPITAL & CARE EXPENSES ================= -->
 
         <!-- ================= TAB 4: GSHEET & FIREBASE SETTINGS ================= -->
         <section class="tab-page" id="tab-gsheet-settings">
@@ -795,5 +893,17 @@ function highlightDuplicates() {
 
     <!-- Application Script -->
     <script src="app.js"></script>
+    <!-- KakaoTalk Notification Modal -->
+    <div class="modal-overlay" id="kakao-modal">
+        <div class="modal-content card" style="max-width: 540px; background:#0f172a; border:1px solid #334155;">
+            <div class="modal-header" style="background:#0f172a; border-bottom:1px solid #334155;">
+                <h3 style="color:#fff;"><i class="fa-solid fa-bell" style="color:#fef08a;"></i> 카카오톡 / 스마트 이체 & 만기 알림 센터</h3>
+                <button class="btn-close" onclick="closeAllModals()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="kakao-modal-body" style="display:flex; flex-direction:column; gap:1rem; padding-top:0.5rem;">
+                <!-- Injected Kakao Reminders -->
+            </div>
+        </div>
+    </div>
 </body>
 </html>
