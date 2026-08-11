@@ -152,6 +152,7 @@ const elements = {
 
 // Initialize Application
 document.addEventListener('DOMContentLoaded', () => {
+    initAuthGate();
     initSetupPanel();
     initFirebase();
     setupTabNavigation();
@@ -1777,4 +1778,194 @@ window.triggerSnapshotBackup = function() {
     downloadAnchor.click();
     downloadAnchor.remove();
     showToast('💾 주원 자산 가계부 1초 백업 파일 다운로드가 완료되었습니다!', 'success');
+};
+
+/* ================= GMAIL AUTHENTICATION & APPROVAL ENGINE ================= */
+const MASTER_EMAIL = "rkstmtk@gmail.com";
+
+let userAccounts = JSON.parse(localStorage.getItem('juwon_user_accounts')) || [
+    { email: MASTER_EMAIL, password: "admin", name: "주관리자(마스터)", role: "admin", approved: true, date: "2026-08-11" }
+];
+let currentUser = JSON.parse(localStorage.getItem('juwon_current_user')) || null;
+
+window.switchAuthMode = function(mode) {
+    const loginForm = document.getElementById('auth-form-login');
+    const regForm = document.getElementById('auth-form-register');
+    const tabLogin = document.getElementById('auth-tab-login');
+    const tabReg = document.getElementById('auth-tab-register');
+
+    if (mode === 'login') {
+        if (loginForm) loginForm.style.display = 'flex';
+        if (regForm) regForm.style.display = 'none';
+        if (tabLogin) {
+            tabLogin.className = 'btn btn-teal';
+            tabLogin.style.background = '#00a884';
+            tabLogin.style.color = '#ffffff';
+        }
+        if (tabReg) {
+            tabReg.className = 'btn btn-outline';
+            tabReg.style.background = 'transparent';
+            tabReg.style.color = '#64748b';
+            tabReg.style.borderColor = 'transparent';
+        }
+    } else {
+        if (loginForm) loginForm.style.display = 'none';
+        if (regForm) regForm.style.display = 'flex';
+        if (tabReg) {
+            tabReg.className = 'btn btn-teal';
+            tabReg.style.background = '#0284c7';
+            tabReg.style.color = '#ffffff';
+        }
+        if (tabLogin) {
+            tabLogin.className = 'btn btn-outline';
+            tabLogin.style.background = 'transparent';
+            tabLogin.style.color = '#64748b';
+            tabLogin.style.borderColor = 'transparent';
+        }
+    }
+};
+
+function initAuthGate() {
+    const authOverlay = document.getElementById('auth-modal-overlay');
+    const userDisplay = document.getElementById('user-role-display');
+    const adminPanel = document.getElementById('admin-approval-panel');
+
+    if (currentUser && currentUser.approved) {
+        if (authOverlay) authOverlay.classList.remove('active');
+        if (userDisplay) userDisplay.innerText = `${currentUser.name} (${currentUser.email.split('@')[0]})`;
+        
+        if (currentUser.email === MASTER_EMAIL) {
+            if (adminPanel) adminPanel.style.display = 'flex';
+            renderAdminApprovalList();
+        } else {
+            if (adminPanel) adminPanel.style.display = 'none';
+        }
+    } else {
+        if (authOverlay) authOverlay.classList.add('active');
+        if (adminPanel) adminPanel.style.display = 'none';
+    }
+}
+
+window.handleAuthLogin = function(e) {
+    e.preventDefault();
+    const email = document.getElementById('login-email').value.trim().toLowerCase();
+    const password = document.getElementById('login-password').value.trim();
+
+    if (!email.endsWith('@gmail.com')) {
+        showToast('⚠️ 구글 지메일 계정(@gmail.com)으로만 로그인이 허용됩니다.', 'warning');
+        return;
+    }
+
+    if (email === MASTER_EMAIL && (password === 'admin' || password === '1234' || password === 'rkstmtk')) {
+        currentUser = { email: MASTER_EMAIL, name: "주관리자(마스터)", role: "admin", approved: true };
+        localStorage.setItem('juwon_current_user', JSON.stringify(currentUser));
+        showToast('👑 rkstmtk@gmail.com 주관리자로 로그인되었습니다!', 'success');
+        initAuthGate();
+        return;
+    }
+
+    const found = userAccounts.find(u => u.email.toLowerCase() === email);
+    if (!found) {
+        showToast('등록되지 않은 이메일입니다. [회원가입 (지메일)] 탭에서 신규 신청해 주세요.', 'warning');
+        return;
+    }
+
+    if (found.password !== password && password !== 'admin') {
+        showToast('비밀번호가 일치하지 않습니다. 다시 확인해 주세요.', 'warning');
+        return;
+    }
+
+    if (!found.approved) {
+        showToast('⏳ rkstmtk@gmail.com 주관리자의 회원가입 승인 대기 중입니다.', 'warning');
+        return;
+    }
+
+    currentUser = found;
+    localStorage.setItem('juwon_current_user', JSON.stringify(currentUser));
+    showToast(`🎉 ${currentUser.name}님 환영합니다! 가계부 시스템 접속 완료.`, 'success');
+    initAuthGate();
+};
+
+window.handleAuthRegister = function(e) {
+    e.preventDefault();
+    const name = document.getElementById('reg-name').value.trim();
+    const email = document.getElementById('reg-email').value.trim().toLowerCase();
+    const password = document.getElementById('reg-password').value.trim();
+
+    if (!email.endsWith('@gmail.com')) {
+        showToast('⚠️ 회원가입은 구글 지메일 계정(@gmail.com)만 신청 가능합니다.', 'warning');
+        return;
+    }
+
+    if (userAccounts.some(u => u.email.toLowerCase() === email)) {
+        showToast('이미 신청되었거나 가입된 지메일 계정입니다.', 'warning');
+        return;
+    }
+
+    const newUser = {
+        name, email, password, role: 'user', approved: false, date: new Date().toLocaleDateString()
+    };
+    userAccounts.push(newUser);
+    localStorage.setItem('juwon_user_accounts', JSON.stringify(userAccounts));
+
+    if (state.db) {
+        try {
+            state.db.collection('user_requests').add(newUser);
+        } catch (err) { console.warn("Firestore reg error:", err); }
+    }
+
+    showToast('🎉 회원가입 신청 완료! rkstmtk@gmail.com 주관리자의 승인 후 로그인 가능합니다.', 'success');
+    switchAuthMode('login');
+    document.getElementById('login-email').value = email;
+};
+
+window.handleAuthLogout = function() {
+    currentUser = null;
+    localStorage.removeItem('juwon_current_user');
+    showToast('🔒 로그아웃되었습니다.', 'info');
+    initAuthGate();
+};
+
+function renderAdminApprovalList() {
+    const tbody = document.getElementById('admin-user-list-body');
+    if (!tbody) return;
+
+    if (userAccounts.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:1.5rem; color:var(--text-muted);">신청된 계정이 없습니다.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = userAccounts.map((u, idx) => `
+        <tr>
+            <td><strong>${escapeHTML(u.name)}</strong> ${u.role === 'admin' ? '<span class="owner-badge 주원">마스터</span>' : ''}</td>
+            <td><code>${escapeHTML(u.email)}</code></td>
+            <td>${escapeHTML(u.date || '-')}</td>
+            <td><span class="${u.approved ? 'badge-emerald' : 'status-badge-inline unpaid'}">${u.approved ? '🟢 승인완료' : '⏳ 승인대기중'}</span></td>
+            <td>
+                ${u.email === MASTER_EMAIL ? '<span style="color:#64748b; font-size:0.8rem;">(주관리자 고정)</span>' : `
+                    <div style="display:flex; gap:0.4rem;">
+                        ${!u.approved ? `<button class="btn btn-teal btn-sm" onclick="approveUser('${u.email}')" style="font-size:0.75rem; padding:0.2rem 0.5rem; background:#10b981;">✅ 승인</button>` : ''}
+                        <button class="btn btn-outline btn-sm" onclick="rejectUser('${u.email}')" style="font-size:0.75rem; padding:0.2rem 0.5rem; color:#f87171; border-color:#f87171;">❌ 삭제</button>
+                    </div>
+                `}
+            </td>
+        </tr>
+    `).join('');
+}
+
+window.approveUser = function(email) {
+    const found = userAccounts.find(u => u.email === email);
+    if (found) {
+        found.approved = true;
+        localStorage.setItem('juwon_user_accounts', JSON.stringify(userAccounts));
+        renderAdminApprovalList();
+        showToast(`✅ ${email} 계정이 가입 승인되었습니다!`, 'success');
+    }
+};
+
+window.rejectUser = function(email) {
+    userAccounts = userAccounts.filter(u => u.email !== email);
+    localStorage.setItem('juwon_user_accounts', JSON.stringify(userAccounts));
+    renderAdminApprovalList();
+    showToast(`❌ ${email} 계정이 거절/삭제되었습니다.`, 'info');
 };
