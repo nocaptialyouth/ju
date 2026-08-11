@@ -788,7 +788,7 @@ function parseGridArray(grid) {
             const dateVal = (row[prod.dateCol] || '').toString().trim();
             const amountVal = (row[prod.amountCol] || '').toString().trim();
 
-            if (monthVal && monthVal !== '총액') {
+            if (monthVal && monthVal !== '총액' && monthVal !== '총역') {
                 const amountNum = parseCurrency(amountVal);
                 let status = 'scheduled';
 
@@ -813,9 +813,6 @@ function parseGridArray(grid) {
                 };
                 prod.records.push(rec);
                 state.allRecordsFlat.push(rec);
-            } else if (monthVal === '총액' && amountVal) {
-                const sheetTotal = parseCurrency(amountVal);
-                if (sheetTotal > 0) prod.totalDeposited = sheetTotal;
             }
         });
 
@@ -839,11 +836,28 @@ function parseGridArray(grid) {
 
     state.products = productCols;
 
-    // Recalculate totalDeposited for each product based on actual deposited records
+    // Recalculate totalDeposited for products based on actual deposited records
     state.products.forEach(p => {
         const depositedSum = p.records.filter(r => r.status === 'deposited').reduce((sum, r) => sum + r.amount, 0);
-        if (depositedSum > 0) {
-            p.totalDeposited = depositedSum;
+        p.totalDeposited = depositedSum;
+    });
+
+    // Merge ALL products from savingsMasterList (적금리스트 탭) into state.products
+    const masterListToMerge = state.savingsMasterList.length > 0 ? state.savingsMasterList : SAVINGS_MASTER_FALLBACK;
+    masterListToMerge.forEach(masterItem => {
+        let existing = state.products.find(p => p.name.includes(masterItem.name) || masterItem.name.includes(p.name));
+        if (!existing) {
+            existing = {
+                id: `prod_master_${state.products.length}`,
+                name: masterItem.name,
+                rate: '약정 이율',
+                records: [],
+                totalDeposited: masterItem.total || 0
+            };
+            state.products.push(existing);
+        } else {
+            const depSum = existing.records.filter(r => r.status === 'deposited').reduce((s, r) => s + r.amount, 0);
+            existing.totalDeposited = depSum > 0 ? depSum : (masterItem.total || 0);
         }
     });
 
