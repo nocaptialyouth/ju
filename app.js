@@ -1863,6 +1863,8 @@ function initAuthGate() {
     const userDisplay = document.getElementById('user-role-display');
     const adminPanel = document.getElementById('admin-approval-panel');
 
+    updatePendingBadgeCount();
+
     if (currentUser && currentUser.approved) {
         if (authOverlay) authOverlay.classList.remove('active');
         if (userDisplay) userDisplay.innerText = `${currentUser.name} (${currentUser.email.split('@')[0]})`;
@@ -2001,7 +2003,110 @@ window.rejectUser = function(email) {
     userAccounts = userAccounts.filter(u => u.email !== email);
     localStorage.setItem('juwon_user_accounts', JSON.stringify(userAccounts));
     renderAdminApprovalList();
+    renderAdminUserMgmtTable();
     showToast(`❌ ${email} 계정이 거절/삭제되었습니다.`, 'info');
+};
+
+/* Dedicated Admin User Management Center Functions */
+let userMgmtFilter = 'all';
+
+window.openAdminUserMgmtModal = function() {
+    if (!currentUser || currentUser.email !== MASTER_EMAIL) {
+        showToast('주관리자(rkstmtk@gmail.com) 권한이 필요합니다.', 'warning');
+        return;
+    }
+    const modal = document.getElementById('admin-user-management-modal');
+    if (modal) {
+        modal.classList.add('active');
+        renderAdminUserMgmtTable();
+    }
+};
+
+window.filterUserMgmtList = function(filterType) {
+    userMgmtFilter = filterType;
+    ['all', 'pending', 'approved'].forEach(f => {
+        const btn = document.getElementById(`user-filter-${f}`);
+        if (btn) {
+            btn.className = (f === filterType) ? 'btn btn-teal btn-sm' : 'btn btn-outline btn-sm';
+        }
+    });
+    renderAdminUserMgmtTable();
+};
+
+function updatePendingBadgeCount() {
+    const badge = document.getElementById('pending-user-badge');
+    const adminBtn = document.getElementById('btn-open-user-mgmt-modal');
+    const pendingCount = userAccounts.filter(u => !u.approved && u.email !== MASTER_EMAIL).length;
+
+    if (badge) badge.innerText = pendingCount;
+
+    if (currentUser && currentUser.email === MASTER_EMAIL) {
+        if (adminBtn) adminBtn.style.display = 'inline-flex';
+    } else {
+        if (adminBtn) adminBtn.style.display = 'none';
+    }
+}
+
+function renderAdminUserMgmtTable() {
+    const tbody = document.getElementById('modal-admin-user-list-body');
+    const searchInput = document.getElementById('user-search-input');
+    const searchVal = (searchInput ? searchInput.value : '').toLowerCase().trim();
+    if (!tbody) return;
+
+    let filtered = userAccounts;
+    if (userMgmtFilter === 'pending') {
+        filtered = filtered.filter(u => !u.approved);
+    } else if (userMgmtFilter === 'approved') {
+        filtered = filtered.filter(u => u.approved);
+    }
+
+    if (searchVal) {
+        filtered = filtered.filter(u => u.name.toLowerCase().includes(searchVal) || u.email.toLowerCase().includes(searchVal));
+    }
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:2rem; color:var(--text-muted);">신청된 이메일 계정이 없습니다.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = filtered.map((u, idx) => `
+        <tr>
+            <td>${idx + 1}</td>
+            <td><strong>${escapeHTML(u.name)}</strong> ${u.role === 'admin' ? '<span class="owner-badge 주원">마스터</span>' : ''}</td>
+            <td><code>${escapeHTML(u.email)}</code></td>
+            <td>${escapeHTML(u.date || '-')}</td>
+            <td><span class="${u.approved ? 'badge-emerald' : 'status-badge-inline unpaid'}">${u.approved ? '🟢 승인완료 (접속가능)' : '⏳ 승인대기중 (접속차단)'}</span></td>
+            <td>
+                ${u.email === MASTER_EMAIL ? '<span style="color:#64748b; font-size:0.8rem;">(주관리자 고정)</span>' : `
+                    <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+                        ${!u.approved 
+                            ? `<button class="btn btn-teal btn-sm" onclick="toggleApproveUser('${u.email}', true)" style="font-size:0.75rem; padding:0.25rem 0.6rem; background:#10b981; border-color:#059669;">✅ 승인 & 권한부여</button>`
+                            : `<button class="btn btn-outline btn-sm" onclick="toggleApproveUser('${u.email}', false)" style="font-size:0.75rem; padding:0.25rem 0.6rem; color:#fbbf24; border-color:#fbbf24;">🔒 권한 회수</button>`
+                        }
+                        <button class="btn btn-outline btn-sm" onclick="rejectUser('${u.email}')" style="font-size:0.75rem; padding:0.25rem 0.6rem; color:#f87171; border-color:#f87171;">❌ 거절/삭제</button>
+                    </div>
+                `}
+            </td>
+        </tr>
+    `).join('');
+
+    updatePendingBadgeCount();
+}
+
+window.toggleApproveUser = function(email, approveState) {
+    const found = userAccounts.find(u => u.email === email);
+    if (found) {
+        found.approved = approveState;
+        localStorage.setItem('juwon_user_accounts', JSON.stringify(userAccounts));
+        renderAdminUserMgmtTable();
+        renderAdminApprovalList();
+        
+        if (approveState) {
+            showToast(`✅ ${email} 계정에 자산 가계부 접속 권한이 승인되었습니다!`, 'success');
+        } else {
+            showToast(`🔒 ${email} 계정 접속 권한이 회수(대기) 처리되었습니다.`, 'info');
+        }
+    }
 };
 
 /* Password Change Handler */
