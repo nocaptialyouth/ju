@@ -501,17 +501,60 @@ function closeAllModals() {
     if (elements.newProductModal) elements.newProductModal.classList.remove('active');
 }
 
+// Bank Search & Official Information Link Mapping
+const BANK_LINKS = {
+    "걸음마 적금(새마을금고)": "https://search.naver.com/search.naver?query=새마을금고+걸음마+적금",
+    "하나은행(산모)": "https://search.naver.com/search.naver?query=하나은행+아이키움+적금",
+    "하나은행": "https://search.naver.com/search.naver?query=하나은행+아이키움+적금",
+    "굴비적금(토스)": "https://search.naver.com/search.naver?query=토스뱅크+굴비적금",
+    "굴비적금": "https://search.naver.com/search.naver?query=토스뱅크+굴비적금",
+    "카카오뱅크 아이적금": "https://search.naver.com/search.naver?query=카카오뱅크+아이적금",
+    "청년미래적금계좌": "https://search.naver.com/search.naver?query=IBK+청년미래적금",
+    "IBK 청년미래적금(우대형)": "https://search.naver.com/search.naver?query=IBK+청년미래적금",
+    "너만SOLO": "https://search.naver.com/search.naver?query=신한은행+너만SOLO+적금",
+    "부모급여": "https://search.naver.com/search.naver?query=2026+부모급여+혜택",
+    "새마을금고예금": "https://search.naver.com/search.naver?query=새마을금고+정기예금",
+    "부산기쁨두배통장": "https://search.naver.com/search.naver?query=부산+기쁨두배통장"
+};
+
+const OFFICIAL_RATES = {
+    "걸음마 적금(새마을금고)": "10.0%",
+    "하나은행(산모)": "5.0%",
+    "하나은행": "5.0%",
+    "굴비적금(토스)": "4.3%",
+    "굴비적금": "4.3%",
+    "카카오뱅크 아이적금": "5.0%",
+    "청년미래적금계좌": "12.0%",
+    "IBK 청년미래적금(우대형)": "12.0%",
+    "너만SOLO": "6.0%",
+    "부모급여": "정부지원",
+    "새마을금고예금": "4.0%",
+    "부산기쁨두배통장": "1+1+이자"
+};
+
+function getBankLink(name) {
+    if (!name) return "https://search.naver.com/search.naver?query=적금+추천";
+    const foundKey = Object.keys(BANK_LINKS).find(k => name.includes(k) || k.includes(name));
+    return foundKey ? BANK_LINKS[foundKey] : `https://search.naver.com/search.naver?query=${encodeURIComponent(name)}`;
+}
+
+function getOfficialRate(name, currentRate) {
+    if (currentRate && currentRate !== '이율 정보 없음' && currentRate !== '약정 이율') return currentRate;
+    const foundKey = Object.keys(OFFICIAL_RATES).find(k => name.includes(k) || k.includes(name));
+    return foundKey ? OFFICIAL_RATES[foundKey] : (currentRate || '약정 이율');
+}
+
 // Embedded Multi-Tab Fallback Data
 const SAVINGS_MASTER_FALLBACK = [
-    { name: "걸음마 적금(새마을금고)", owners: ["주원"], monthly: 300000, monthlyFormatted: "₩300,000", total: 300000, totalFormatted: "₩300,000", startDate: "2026. 7. 30", endDate: "2027. 7. 30" },
-    { name: "하나은행(산모)", owners: ["지헌"], monthly: 300000, monthlyFormatted: "₩300,000", total: 300000, totalFormatted: "₩300,000", startDate: "-", endDate: "-" },
-    { name: "굴비적금(토스)", owners: ["지헌"], monthly: 300000, monthlyFormatted: "₩300,000", total: 1200000, totalFormatted: "₩1,200,000", startDate: "-", endDate: "-" },
-    { name: "카카오뱅크 아이적금", owners: ["주원"], monthly: 0, monthlyFormatted: "₩0", total: 0, totalFormatted: "₩0", startDate: "-", endDate: "-" },
-    { name: "청년미래적금계좌", owners: ["준영"], monthly: 500000, monthlyFormatted: "₩500,000", total: 0, totalFormatted: "₩0", startDate: "2026. 8. 25", endDate: "2029. 8. 25" },
-    { name: "너만SOLO", owners: ["지헌"], monthly: 300000, monthlyFormatted: "₩300,000", total: 10000000, totalFormatted: "₩10,000,000", startDate: "2023. 8. 25", endDate: "2026. 8. 25" },
-    { name: "부모급여", owners: ["지헌"], monthly: 1000000, monthlyFormatted: "₩1,000,000", total: 19000000, totalFormatted: "₩19,000,000", startDate: "2026. 8. 25", endDate: "2027. 8. 25" },
-    { name: "새마을금고예금", owners: ["준영"], monthly: 20000000, monthlyFormatted: "₩20,000,000", total: 20000000, totalFormatted: "₩20,000,000", startDate: "2026. 6. 25", endDate: "2026. 9. 25" },
-    { name: "부산기쁨두배통장", owners: ["지헌"], monthly: 100000, monthlyFormatted: "₩100,000", total: 300000, totalFormatted: "₩300,000", startDate: "2025. 8. 25", endDate: "2028. 8. 25" }
+    { name: "걸음마 적금(새마을금고)", owners: ["주원"], rate: "10.0%", monthly: 300000, monthlyFormatted: "₩300,000", total: 300000, totalFormatted: "₩300,000", startDate: "2026. 7. 30", endDate: "2027. 7. 30" },
+    { name: "하나은행(산모)", owners: ["지헌"], rate: "5.0%", monthly: 300000, monthlyFormatted: "₩300,000", total: 300000, totalFormatted: "₩300,000", startDate: "-", endDate: "-" },
+    { name: "굴비적금(토스)", owners: ["지헌"], rate: "4.3%", monthly: 300000, monthlyFormatted: "₩300,000", total: 1200000, totalFormatted: "₩1,200,000", startDate: "-", endDate: "-" },
+    { name: "카카오뱅크 아이적금", owners: ["주원"], rate: "5.0%", monthly: 0, monthlyFormatted: "₩0", total: 0, totalFormatted: "₩0", startDate: "-", endDate: "-" },
+    { name: "청년미래적금계좌", owners: ["준영"], rate: "12.0%", monthly: 500000, monthlyFormatted: "₩500,000", total: 500000, totalFormatted: "₩500,000", startDate: "2026. 8. 25", endDate: "2029. 8. 25" },
+    { name: "너만SOLO", owners: ["지헌"], rate: "6.0%", monthly: 300000, monthlyFormatted: "₩300,000", total: 10000000, totalFormatted: "₩10,000,000", startDate: "2023. 8. 25", endDate: "2026. 8. 25" },
+    { name: "부모급여", owners: ["지헌"], rate: "정부지원", monthly: 1000000, monthlyFormatted: "₩1,000,000", total: 19000000, totalFormatted: "₩19,000,000", startDate: "2026. 8. 25", endDate: "2027. 8. 25" },
+    { name: "새마을금고예금", owners: ["준영"], rate: "4.0%", monthly: 20000000, monthlyFormatted: "₩20,000,000", total: 20000000, totalFormatted: "₩20,000,000", startDate: "2026. 6. 25", endDate: "2026. 9. 25" },
+    { name: "부산기쁨두배통장", owners: ["지헌"], rate: "1+1+이자", monthly: 100000, monthlyFormatted: "₩100,000", total: 300000, totalFormatted: "₩300,000", startDate: "2025. 8. 25", endDate: "2028. 8. 25" }
 ];
 
 const HOSPITAL_EXPENSES_FALLBACK = [
@@ -909,6 +952,8 @@ function renderProductsGrid() {
 
         const masterInfo = state.savingsMasterList.find(m => m.name.includes(prod.name) || prod.name.includes(m.name));
         const ownersHTML = masterInfo ? masterInfo.owners.map(o => `<span class="owner-badge ${o}">${o}</span>`).join(' ') : '';
+        const bankLink = getBankLink(prod.name);
+        const rateDisplay = getOfficialRate(prod.name, prod.rate);
 
         return `
             <div class="card product-card">
@@ -918,7 +963,7 @@ function renderProductsGrid() {
                             <h4 style="margin:0;">${escapeHTML(prod.name)}</h4>
                             ${ownersHTML}
                         </div>
-                        <span class="rate-badge" style="margin-top:0.25rem;"><i class="fa-solid fa-percent"></i> ${escapeHTML(prod.rate)}</span>
+                        <span class="rate-badge" style="margin-top:0.25rem;"><i class="fa-solid fa-percent"></i> ${escapeHTML(rateDisplay)}</span>
                     </div>
                     <div class="product-total-box">
                         <span class="kpi-label">현재 누적액</span>
@@ -933,9 +978,14 @@ function renderProductsGrid() {
 
                 <div class="product-actions">
                     <span class="badge-emerald">${deposited > 0 ? `진행중 (${deposited}회)` : '예정'}</span>
-                    <button class="btn btn-dark-slate btn-sm" onclick="openProductDetail('${prod.id}')">
-                        <i class="fa-solid fa-list"></i> 상세 내역
-                    </button>
+                    <div style="display:flex; gap:0.35rem;">
+                        <a href="${bankLink}" target="_blank" rel="noopener noreferrer" class="btn btn-dark-slate btn-sm" title="네이버/공식 은행 정보 검색" style="padding:0.35rem 0.6rem; text-decoration:none;">
+                            <i class="fa-solid fa-arrow-up-right-from-square"></i> 정보
+                        </a>
+                        <button class="btn btn-teal btn-sm" onclick="openProductDetail('${prod.id}')">
+                            <i class="fa-solid fa-list"></i> 상세 내역
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
@@ -1090,19 +1140,31 @@ function renderMaturityTable() {
 function renderSavingsMasterTable() {
     if (!elements.savingsMasterTableBody) return;
     const list = state.savingsMasterList.length > 0 ? state.savingsMasterList : SAVINGS_MASTER_FALLBACK;
-    elements.savingsMasterTableBody.innerHTML = list.map((item, idx) => `
-        <tr>
-            <td>${idx + 1}</td>
-            <td><strong>${escapeHTML(item.name)}</strong></td>
-            <td>
-                ${item.owners.map(o => `<span class="owner-badge ${o}">${o}</span>`).join(' ')}
-            </td>
-            <td><strong>${item.monthlyFormatted || formatKRW(item.monthly)}</strong></td>
-            <td><strong style="color:var(--accent-emerald);">${item.totalFormatted || formatKRW(item.total)}</strong></td>
-            <td>${escapeHTML(item.startDate || item.start || '-')}</td>
-            <td>${escapeHTML(item.endDate || item.end || '-')}</td>
-        </tr>
-    `).join('');
+    elements.savingsMasterTableBody.innerHTML = list.map((item, idx) => {
+        const bankLink = getBankLink(item.name);
+        const rateDisplay = getOfficialRate(item.name, item.rate);
+        return `
+            <tr>
+                <td>${idx + 1}</td>
+                <td>
+                    <div style="display:flex; align-items:center; gap:0.4rem;">
+                        <strong>${escapeHTML(item.name)}</strong>
+                        <a href="${bankLink}" target="_blank" rel="noopener noreferrer" style="color:var(--text-secondary); font-size:0.8rem;" title="네이버 공식 상품 검색">
+                            <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                        </a>
+                    </div>
+                </td>
+                <td>
+                    ${item.owners.map(o => `<span class="owner-badge ${o}">${o}</span>`).join(' ')}
+                </td>
+                <td><span class="rate-badge" style="font-size:0.8rem;"><i class="fa-solid fa-percent"></i> ${escapeHTML(rateDisplay)}</span></td>
+                <td><strong>${item.monthlyFormatted || formatKRW(item.monthly)}</strong></td>
+                <td><strong style="color:var(--accent-emerald);">${item.totalFormatted || formatKRW(item.total)}</strong></td>
+                <td>${escapeHTML(item.startDate || item.start || '-')}</td>
+                <td>${escapeHTML(item.endDate || item.end || '-')}</td>
+            </tr>
+        `;
+    }).join('');
 }
 
 function renderHospitalExpensesTable() {
@@ -1164,13 +1226,19 @@ window.openProductDetail = function(productId) {
     const product = state.products.find(p => p.id === productId);
     if (!product) return;
 
+    const bankLink = getBankLink(product.name);
+    const rateDisplay = getOfficialRate(product.name, product.rate);
+
     elements.productDetailTitle.innerText = `${product.name} 상세 입금 내역`;
     elements.productDetailBody.innerHTML = `
-        <div style="margin-bottom: 1.2rem; display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.25); padding:0.85rem 1rem; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+        <div style="margin-bottom: 1.2rem; display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.25); padding:0.85rem 1rem; border-radius:var(--radius-sm); border:1px solid var(--border-color); flex-wrap:wrap; gap:0.5rem;">
             <div>
-                <div style="font-size:0.85rem; color:var(--text-secondary);">적금 이율</div>
-                <strong style="color:#60a5fa; font-size:1.05rem;">${escapeHTML(product.rate)}</strong>
+                <div style="font-size:0.85rem; color:var(--text-secondary);">적금 이율 (최고)</div>
+                <strong style="color:#60a5fa; font-size:1.05rem;">${escapeHTML(rateDisplay)}</strong>
             </div>
+            <a href="${bankLink}" target="_blank" rel="noopener noreferrer" class="btn btn-dark-slate btn-sm" style="font-size:0.8rem; padding:0.35rem 0.75rem; text-decoration:none;">
+                <i class="fa-solid fa-arrow-up-right-from-square"></i> 네이버/은행 공식 페이지
+            </a>
             <div style="text-align:right;">
                 <div style="font-size:0.85rem; color:var(--text-secondary);">현재 누적 입금 총액</div>
                 <strong style="color:var(--accent-emerald); font-size:1.15rem;">${formatKRW(product.totalDeposited)}</strong>
