@@ -524,12 +524,27 @@ const OFFICIAL_RATES = {
     "굴비적금(토스)": "4.3%",
     "굴비적금": "4.3%",
     "카카오뱅크 아이적금": "5.0%",
-    "청년미래적금계좌": "12.0%",
-    "IBK 청년미래적금(우대형)": "12.0%",
+    "청년미래적금계좌": "6.0% (일반형)",
+    "IBK 청년미래적금(우대형)": "6.0% (일반형)",
     "너만SOLO": "6.0%",
     "부모급여": "정부지원",
     "새마을금고예금": "4.0%",
     "부산기쁨두배통장": "1+1+이자"
+};
+
+const PRODUCT_EPISODES = {
+    "걸음마 적금(새마을금고)": 12,
+    "하나은행(산모)": 12,
+    "하나은행": 12,
+    "굴비적금(토스)": 6,
+    "굴비적금": 6,
+    "카카오뱅크 아이적금": 26,
+    "청년미래적금계좌": 36,
+    "IBK 청년미래적금(우대형)": 36,
+    "너만SOLO": 36,
+    "부모급여": 12,
+    "새마을금고예금": 1,
+    "부산기쁨두배통장": 36
 };
 
 function getBankLink(name) {
@@ -539,9 +554,15 @@ function getBankLink(name) {
 }
 
 function getOfficialRate(name, currentRate) {
-    if (currentRate && currentRate !== '이율 정보 없음' && currentRate !== '약정 이율') return currentRate;
+    if (currentRate && currentRate !== '이율 정보 없음' && currentRate !== '약정 이율' && !currentRate.includes('12.0%')) return currentRate;
     const foundKey = Object.keys(OFFICIAL_RATES).find(k => name.includes(k) || k.includes(name));
     return foundKey ? OFFICIAL_RATES[foundKey] : (currentRate || '약정 이율');
+}
+
+function getTargetEpisodes(name, actualRecordCount) {
+    const foundKey = Object.keys(PRODUCT_EPISODES).find(k => name.includes(k) || k.includes(name));
+    const target = foundKey ? PRODUCT_EPISODES[foundKey] : 12;
+    return Math.max(target, actualRecordCount || 0);
 }
 
 // Embedded Multi-Tab Fallback Data
@@ -550,7 +571,7 @@ const SAVINGS_MASTER_FALLBACK = [
     { name: "하나은행(산모)", owners: ["지헌"], rate: "5.0%", monthly: 300000, monthlyFormatted: "₩300,000", total: 300000, totalFormatted: "₩300,000", startDate: "-", endDate: "-" },
     { name: "굴비적금(토스)", owners: ["지헌"], rate: "4.3%", monthly: 300000, monthlyFormatted: "₩300,000", total: 1200000, totalFormatted: "₩1,200,000", startDate: "-", endDate: "-" },
     { name: "카카오뱅크 아이적금", owners: ["주원"], rate: "5.0%", monthly: 0, monthlyFormatted: "₩0", total: 0, totalFormatted: "₩0", startDate: "-", endDate: "-" },
-    { name: "청년미래적금계좌", owners: ["준영"], rate: "12.0%", monthly: 500000, monthlyFormatted: "₩500,000", total: 500000, totalFormatted: "₩500,000", startDate: "2026. 8. 25", endDate: "2029. 8. 25" },
+    { name: "청년미래적금계좌", owners: ["준영"], rate: "6.0% (일반형)", monthly: 500000, monthlyFormatted: "₩500,000", total: 500000, totalFormatted: "₩500,000", startDate: "2026. 8. 25", endDate: "2029. 8. 25" },
     { name: "너만SOLO", owners: ["지헌"], rate: "6.0%", monthly: 300000, monthlyFormatted: "₩300,000", total: 10000000, totalFormatted: "₩10,000,000", startDate: "2023. 8. 25", endDate: "2026. 8. 25" },
     { name: "부모급여", owners: ["지헌"], rate: "정부지원", monthly: 1000000, monthlyFormatted: "₩1,000,000", total: 19000000, totalFormatted: "₩19,000,000", startDate: "2026. 8. 25", endDate: "2027. 8. 25" },
     { name: "새마을금고예금", owners: ["준영"], rate: "4.0%", monthly: 20000000, monthlyFormatted: "₩20,000,000", total: 20000000, totalFormatted: "₩20,000,000", startDate: "2026. 6. 25", endDate: "2026. 9. 25" },
@@ -947,13 +968,21 @@ function renderProductsGrid() {
 
     elements.productsContainer.innerHTML = state.products.map(prod => {
         const deposited = prod.records.filter(r => r.status === 'deposited').length;
-        const total = prod.records.length;
+        const targetEpisodes = getTargetEpisodes(prod.name, prod.records.length);
         const lastRec = prod.records.filter(r => r.status === 'deposited').slice(-1)[0];
 
         const masterInfo = state.savingsMasterList.find(m => m.name.includes(prod.name) || prod.name.includes(m.name));
         const ownersHTML = masterInfo ? masterInfo.owners.map(o => `<span class="owner-badge ${o}">${o}</span>`).join(' ') : '';
         const bankLink = getBankLink(prod.name);
         const rateDisplay = getOfficialRate(prod.name, prod.rate);
+        const completionPct = Math.min(100, Math.round((deposited / targetEpisodes) * 100));
+
+        let statusTagHTML = `<span class="badge-emerald">${deposited > 0 ? `진행중 (${deposited}회)` : '예정'}</span>`;
+        if (completionPct >= 100) {
+            statusTagHTML = `<span class="tag tag-gold" style="font-weight:700;"><i class="fa-solid fa-flag-checkered"></i> 만기/해지가능</span>`;
+        } else if (completionPct >= 90) {
+            statusTagHTML = `<span class="tag tag-blue" style="background:#3b82f6; color:#fff; font-weight:700;"><i class="fa-solid fa-hourglass-half"></i> 만기임박 (${completionPct}%)</span>`;
+        }
 
         return `
             <div class="card product-card">
@@ -972,12 +1001,17 @@ function renderProductsGrid() {
                 </div>
 
                 <div class="product-status-mini">
-                    <div><i class="fa-solid fa-calendar-check"></i> 납입: <strong>${deposited} / ${total}회</strong></div>
+                    <div><i class="fa-solid fa-calendar-check"></i> 납입: <strong>${deposited} / ${targetEpisodes}회 (${completionPct}%)</strong></div>
                     <div>최근입금: <strong>${lastRec ? lastRec.date : '-'}</strong></div>
                 </div>
 
+                <!-- Product Progress Bar -->
+                <div style="width:100%; background:rgba(255,255,255,0.08); height:6px; border-radius:3px; overflow:hidden; margin:0.6rem 0;">
+                    <div style="width:${completionPct}%; background:${completionPct >= 100 ? '#f59e0b' : '#10b981'}; height:100%; transition:width 0.3s ease;"></div>
+                </div>
+
                 <div class="product-actions">
-                    <span class="badge-emerald">${deposited > 0 ? `진행중 (${deposited}회)` : '예정'}</span>
+                    ${statusTagHTML}
                     <div style="display:flex; gap:0.35rem;">
                         <a href="${bankLink}" target="_blank" rel="noopener noreferrer" class="btn btn-dark-slate btn-sm" title="네이버/공식 은행 정보 검색" style="padding:0.35rem 0.6rem; text-decoration:none;">
                             <i class="fa-solid fa-arrow-up-right-from-square"></i> 정보
