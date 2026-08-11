@@ -1797,11 +1797,35 @@ let userAccounts = JSON.parse(localStorage.getItem('juwon_user_accounts')) || [
 ];
 let currentUser = JSON.parse(localStorage.getItem('juwon_current_user')) || null;
 
+function showAuthAlert(message, type = 'info') {
+    const box = document.getElementById('auth-alert-box');
+    if (box) {
+        box.style.display = 'block';
+        if (type === 'success') {
+            box.style.background = '#dcfce7';
+            box.style.color = '#15803d';
+            box.style.border = '1px solid #86efac';
+        } else if (type === 'warning' || type === 'error') {
+            box.style.background = '#fee2e2';
+            box.style.color = '#b91c1c';
+            box.style.border = '1px solid #fca5a5';
+        } else {
+            box.style.background = '#e0f2fe';
+            box.style.color = '#0369a1';
+            box.style.border = '1px solid #7dd3fc';
+        }
+        box.innerHTML = message;
+    }
+    showToast(message, type);
+}
+
 window.switchAuthMode = function(mode) {
     const loginForm = document.getElementById('auth-form-login');
     const regForm = document.getElementById('auth-form-register');
     const tabLogin = document.getElementById('auth-tab-login');
     const tabReg = document.getElementById('auth-tab-register');
+    const alertBox = document.getElementById('auth-alert-box');
+    if (alertBox && alertBox.style.display !== 'block') alertBox.style.display = 'none';
 
     if (mode === 'login') {
         if (loginForm) loginForm.style.display = 'flex';
@@ -1861,37 +1885,37 @@ window.handleAuthLogin = function(e) {
     const password = document.getElementById('login-password').value.trim();
 
     if (!email.endsWith('@gmail.com')) {
-        showToast('⚠️ 구글 지메일 계정(@gmail.com)으로만 로그인이 허용됩니다.', 'warning');
+        showAuthAlert('⚠️ 구글 지메일 계정(@gmail.com)으로만 로그인이 허용됩니다.', 'warning');
         return;
     }
 
     if (email === MASTER_EMAIL && (password === 'admin' || password === '1234' || password === 'rkstmtk')) {
         currentUser = { email: MASTER_EMAIL, name: "주관리자(마스터)", role: "admin", approved: true };
         localStorage.setItem('juwon_current_user', JSON.stringify(currentUser));
-        showToast('👑 rkstmtk@gmail.com 주관리자로 로그인되었습니다!', 'success');
+        showAuthAlert('👑 주관리자로 로그인되었습니다!', 'success');
         initAuthGate();
         return;
     }
 
     const found = userAccounts.find(u => u.email.toLowerCase() === email);
     if (!found) {
-        showToast('등록되지 않은 이메일입니다. [회원가입 (지메일)] 탭에서 신규 신청해 주세요.', 'warning');
+        showAuthAlert('⚠️ 등록되지 않은 이메일입니다. [회원가입 (지메일)] 탭에서 신규 신청해 주세요.', 'warning');
         return;
     }
 
     if (found.password !== password && password !== 'admin') {
-        showToast('비밀번호가 일치하지 않습니다. 다시 확인해 주세요.', 'warning');
+        showAuthAlert('⚠️ 비밀번호가 일치하지 않습니다. 다시 확인해 주세요.', 'warning');
         return;
     }
 
     if (!found.approved) {
-        showToast('⏳ rkstmtk@gmail.com 주관리자의 회원가입 승인 대기 중입니다.', 'warning');
+        showAuthAlert('⏳ 주관리자의 회원가입 승인 대기 중입니다.', 'warning');
         return;
     }
 
     currentUser = found;
     localStorage.setItem('juwon_current_user', JSON.stringify(currentUser));
-    showToast(`🎉 ${currentUser.name}님 환영합니다! 가계부 시스템 접속 완료.`, 'success');
+    showAuthAlert(`🎉 ${currentUser.name}님 환영합니다! 접속 완료.`, 'success');
     initAuthGate();
 };
 
@@ -1902,12 +1926,12 @@ window.handleAuthRegister = function(e) {
     const password = document.getElementById('reg-password').value.trim();
 
     if (!email.endsWith('@gmail.com')) {
-        showToast('⚠️ 회원가입은 구글 지메일 계정(@gmail.com)만 신청 가능합니다.', 'warning');
+        showAuthAlert('⚠️ 회원가입은 구글 지메일 계정(@gmail.com)만 신청 가능합니다.', 'warning');
         return;
     }
 
     if (userAccounts.some(u => u.email.toLowerCase() === email)) {
-        showToast('이미 신청되었거나 가입된 지메일 계정입니다.', 'warning');
+        showAuthAlert('⚠️ 이미 신청되었거나 가입된 지메일 계정입니다.', 'warning');
         return;
     }
 
@@ -1923,9 +1947,10 @@ window.handleAuthRegister = function(e) {
         } catch (err) { console.warn("Firestore reg error:", err); }
     }
 
-    showToast('🎉 회원가입 신청 완료! rkstmtk@gmail.com 주관리자의 승인 후 로그인 가능합니다.', 'success');
+    showAuthAlert(`🎉 <strong>회원가입 신청이 완료되었습니다!</strong><br><code>${email}</code> 계정 등록 완료. 주관리자의 승인 후 로그인하실 수 있습니다.`, 'success');
     switchAuthMode('login');
-    document.getElementById('login-email').value = email;
+    const loginEmailInput = document.getElementById('login-email');
+    if (loginEmailInput) loginEmailInput.value = email;
 };
 
 window.handleAuthLogout = function() {
