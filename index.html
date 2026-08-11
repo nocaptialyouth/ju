@@ -174,6 +174,60 @@
                 </div>
             </div>
 
+            <!-- 📊 Feature 1: Monthly Cashflow Predictor Card -->
+            <div class="card cashflow-card" style="background:#0f172a; border:1px solid #1e293b; color:#fff; padding:1.25rem; margin-bottom:1.5rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
+                    <div style="display:flex; align-items:center; gap:0.6rem;">
+                        <span style="font-size:1.5rem; background:rgba(13, 148, 136, 0.2); padding:0.4rem 0.6rem; border-radius:10px; color:#2dd4bf;">📊</span>
+                        <div>
+                            <h3 style="font-size:1.05rem; font-weight:800; color:#fff; margin:0;">2026~2027 월별 수입 vs 저축 캐시플로우 예측</h3>
+                            <span style="font-size:0.75rem; color:#94a3b8;">정부 지원금 + 만기금 수입 vs 월 적금 저축 지출 차트</span>
+                        </div>
+                    </div>
+                    <!-- Month Selector Buttons -->
+                    <div class="cashflow-month-selector" style="display:flex; gap:0.3rem; flex-wrap:wrap;">
+                        <button class="btn btn-teal btn-sm" onclick="selectCashflowMonth('2026-08')" id="cf-m-2026-08">2026. 8월</button>
+                        <button class="btn btn-outline btn-sm" onclick="selectCashflowMonth('2026-09')" id="cf-m-2026-09">9월 (예금만기)</button>
+                        <button class="btn btn-outline btn-sm" onclick="selectCashflowMonth('2026-10')" id="cf-m-2026-10">10월</button>
+                        <button class="btn btn-outline btn-sm" onclick="selectCashflowMonth('2026-11')" id="cf-m-2026-11">11월</button>
+                        <button class="btn btn-outline btn-sm" onclick="selectCashflowMonth('2026-12')" id="cf-m-2026-12">12월</button>
+                    </div>
+                </div>
+
+                <!-- Monthly Waterfall Metrics -->
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:0.85rem; margin-bottom:1rem;">
+                    <div style="background:#1e293b; padding:0.85rem; border-radius:var(--radius-sm); border-left:4px solid #10b981;">
+                        <span style="font-size:0.78rem; color:#94a3b8;">💚 예상 총수입 (Inflow)</span>
+                        <h4 id="cf-inflow-val" style="font-size:1.15rem; font-weight:800; color:#34d399; margin:0.2rem 0 0 0;">₩1,100,000</h4>
+                        <span id="cf-inflow-desc" style="font-size:0.72rem; color:#cbd5e1;">부모급여 100만 + 아동수당 10만</span>
+                    </div>
+
+                    <div style="background:#1e293b; padding:0.85rem; border-radius:var(--radius-sm); border-left:4px solid #3b82f6;">
+                        <span style="font-size:0.78rem; color:#94a3b8;">💙 예상 총저축 (Outflow)</span>
+                        <h4 id="cf-outflow-val" style="font-size:1.15rem; font-weight:800; color:#60a5fa; margin:0.2rem 0 0 0;">₩2,000,000</h4>
+                        <span id="cf-outflow-desc" style="font-size:0.72rem; color:#cbd5e1;">약정 적금 상품 4종 납입</span>
+                    </div>
+
+                    <div style="background:#1e293b; padding:0.85rem; border-radius:var(--radius-sm); border-left:4px solid #f59e0b;">
+                        <span style="font-size:0.78rem; color:#94a3b8;">🧡 월 순수 잔여금 (Surplus)</span>
+                        <h4 id="cf-surplus-val" style="font-size:1.15rem; font-weight:800; color:#fbbf24; margin:0.2rem 0 0 0;">-₩900,000</h4>
+                        <span id="cf-surplus-desc" style="font-size:0.72rem; color:#cbd5e1;">기타 주저축/생활비 차감</span>
+                    </div>
+                </div>
+
+                <!-- Interactive Comparison Bar Visualizer -->
+                <div style="background:#1e293b; padding:0.85rem; border-radius:var(--radius-sm);">
+                    <div style="display:flex; justify-content:space-between; font-size:0.78rem; color:#cbd5e1; margin-bottom:0.4rem;">
+                        <span>수입 대비 저축 비중 비율</span>
+                        <span id="cf-ratio-text">저축비율 181%</span>
+                    </div>
+                    <div style="height:12px; background:#334155; border-radius:9999px; overflow:hidden; display:flex;">
+                        <div id="cf-bar-inflow" style="width:35%; background:#10b981; transition:width 0.5s ease;" title="수입"></div>
+                        <div id="cf-bar-outflow" style="width:65%; background:#3b82f6; transition:width 0.5s ease;" title="저축"></div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Main Split Grid -->
             <div class="split-grid">
                 <!-- Left Column: Products Grid -->
@@ -342,8 +396,10 @@
                             <th>NO</th>
                             <th>적금/예금 상품명</th>
                             <th>소유자 (명의)</th>
+                            <th>약정 이율</th>
                             <th>매달 입금액</th>
                             <th>총 금액 (현재 누적)</th>
+                            <th>예상 세후 이자 (15.4%과세/비과세)</th>
                             <th>시작일</th>
                             <th>만기일</th>
                         </tr>

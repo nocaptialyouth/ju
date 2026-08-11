@@ -1283,12 +1283,81 @@ function renderMaturityTable() {
     `).join('');
 }
 
+function calculateNetInterest(principal, rateStr, name) {
+    const rateNum = parseFloat(rateStr) || 4.0;
+    const isTaxFree = name.includes('새마을금고') || name.includes('청년') || name.includes('걸음마') || name.includes('용용') || (rateStr && rateStr.includes('비과세'));
+    
+    const grossInterest = Math.round(principal * (rateNum / 100));
+    const tax = isTaxFree ? 0 : Math.round(grossInterest * 0.154);
+    const netInterest = grossInterest - tax;
+    
+    return { grossInterest, tax, netInterest, isTaxFree };
+}
+
+window.selectCashflowMonth = function(monthKey) {
+    const months = ['2026-08', '2026-09', '2026-10', '2026-11', '2026-12'];
+    months.forEach(m => {
+        const btn = document.getElementById(`cf-m-${m}`);
+        if (btn) {
+            btn.className = (m === monthKey) ? 'btn btn-teal btn-sm' : 'btn btn-outline btn-sm';
+        }
+    });
+
+    let inflow = 1100000;
+    let inflowDesc = "부모급여 100만 + 아동수당 10만";
+    let outflow = 2000000;
+    let outflowDesc = "약정 적금 상품 4종 납입";
+
+    if (monthKey === '2026-09') {
+        inflow += 20000000;
+        inflowDesc = "부모급여 110만 + 🌟새마을금고 2,000만 예금만기";
+    }
+
+    const surplus = inflow - outflow;
+
+    const inflowValEl = document.getElementById('cf-inflow-val');
+    const inflowDescEl = document.getElementById('cf-inflow-desc');
+    const outflowValEl = document.getElementById('cf-outflow-val');
+    const outflowDescEl = document.getElementById('cf-outflow-desc');
+    const surplusValEl = document.getElementById('cf-surplus-val');
+    const surplusDescEl = document.getElementById('cf-surplus-desc');
+    const ratioTextEl = document.getElementById('cf-ratio-text');
+    const barInflowEl = document.getElementById('cf-bar-inflow');
+    const barOutflowEl = document.getElementById('cf-bar-outflow');
+
+    if (inflowValEl) inflowValEl.innerText = formatKRW(inflow);
+    if (inflowDescEl) inflowDescEl.innerText = inflowDesc;
+    if (outflowValEl) outflowValEl.innerText = formatKRW(outflow);
+    if (outflowDescEl) outflowDescEl.innerText = outflowDesc;
+
+    if (surplusValEl) {
+        surplusValEl.innerText = (surplus >= 0 ? '+' : '') + formatKRW(surplus);
+        surplusValEl.style.color = surplus >= 0 ? '#34d399' : '#fbbf24';
+    }
+    if (surplusDescEl) {
+        surplusDescEl.innerText = surplus >= 0 ? "🎉 당월 예금 만기 흑자 이월" : "기타 주저축/생활비 차감";
+    }
+
+    const totalSum = inflow + outflow;
+    const inPct = Math.round((inflow / totalSum) * 100);
+    const outPct = 100 - inPct;
+
+    if (barInflowEl) barInflowEl.style.width = `${inPct}%`;
+    if (barOutflowEl) barOutflowEl.style.width = `${outPct}%`;
+    if (ratioTextEl) ratioTextEl.innerText = `수입 ${inPct}% vs 저축 ${outPct}%`;
+};
+
 function renderSavingsMasterTable() {
     if (!elements.savingsMasterTableBody) return;
     const list = state.savingsMasterList.length > 0 ? state.savingsMasterList : SAVINGS_MASTER_FALLBACK;
     elements.savingsMasterTableBody.innerHTML = list.map((item, idx) => {
         const bankLink = getBankLink(item.name);
         const rateDisplay = getOfficialRate(item.name, item.rate);
+        const netCalc = calculateNetInterest(item.total || item.monthly * 12, rateDisplay, item.name);
+        const netDisplay = netCalc.isTaxFree 
+            ? `<span style="color:#34d399; font-weight:700;">+${formatKRW(netCalc.netInterest)} (비과세 100%)</span>`
+            : `<span style="color:#60a5fa; font-weight:700;">+${formatKRW(netCalc.netInterest)} (세후, 세금 -${formatKRW(netCalc.tax)})</span>`;
+
         return `
             <tr>
                 <td>${idx + 1}</td>
@@ -1306,6 +1375,7 @@ function renderSavingsMasterTable() {
                 <td><span class="rate-badge" style="font-size:0.8rem;"><i class="fa-solid fa-percent"></i> ${escapeHTML(rateDisplay)}</span></td>
                 <td><strong>${item.monthlyFormatted || formatKRW(item.monthly)}</strong></td>
                 <td><strong style="color:var(--accent-emerald);">${item.totalFormatted || formatKRW(item.total)}</strong></td>
+                <td>${netDisplay}</td>
                 <td>${escapeHTML(item.startDate || item.start || '-')}</td>
                 <td>${escapeHTML(item.endDate || item.end || '-')}</td>
             </tr>
