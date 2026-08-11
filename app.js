@@ -132,6 +132,12 @@ const elements = {
     modalProductSelect: document.getElementById('modal-product-select'),
     btnDepositCancel: document.getElementById('btn-deposit-cancel'),
 
+    btnOpenNewProductModal: document.getElementById('btn-open-new-product-modal'),
+    newProductModal: document.getElementById('new-product-modal'),
+    newProductModalClose: document.getElementById('new-product-modal-close'),
+    newProductForm: document.getElementById('new-product-form'),
+    btnNewProdCancel: document.getElementById('btn-new-prod-cancel'),
+
     productDetailModal: document.getElementById('product-detail-modal'),
     productDetailClose: document.getElementById('product-detail-close'),
     productDetailTitle: document.getElementById('product-detail-title'),
@@ -402,6 +408,73 @@ function setupEventListeners() {
         }
     });
 
+    if (elements.btnOpenNewProductModal) {
+        elements.btnOpenNewProductModal.addEventListener('click', () => {
+            if (elements.newProductModal) elements.newProductModal.classList.add('active');
+        });
+    }
+    if (elements.newProductModalClose) elements.newProductModalClose.addEventListener('click', closeAllModals);
+    if (elements.btnNewProdCancel) elements.btnNewProdCancel.addEventListener('click', closeAllModals);
+
+    if (elements.newProductForm) {
+        elements.newProductForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const name = document.getElementById('new-prod-name').value.trim();
+            const rate = document.getElementById('new-prod-rate').value.trim() || '5.0%';
+            const owner = document.getElementById('new-prod-owner').value;
+            const monthly = parseFloat(document.getElementById('new-prod-monthly').value) || 300000;
+            const initial = parseFloat(document.getElementById('new-prod-initial').value) || 0;
+            const startDate = document.getElementById('new-prod-start').value.trim() || '2026. 8. 11';
+            const endDate = document.getElementById('new-prod-end').value.trim() || '2027. 8. 11';
+
+            if (!name) return;
+
+            const newProd = {
+                id: `prod_new_${Date.now()}`,
+                name,
+                rate,
+                records: initial > 0 ? [{
+                    id: `rec_${Date.now()}`,
+                    productName: name,
+                    rate,
+                    month: '8월',
+                    date: startDate,
+                    amount: initial,
+                    amountFormatted: formatKRW(initial),
+                    status: 'deposited'
+                }] : [],
+                totalDeposited: initial
+            };
+
+            state.products.push(newProd);
+
+            state.savingsMasterList.push({
+                name,
+                owners: [owner],
+                monthly,
+                monthlyFormatted: formatKRW(monthly),
+                total: initial,
+                totalFormatted: formatKRW(initial),
+                startDate,
+                endDate
+            });
+
+            if (state.db) {
+                try {
+                    state.db.collection('products').add({ name, rate, owner, monthly, initial, startDate, endDate });
+                } catch (err) {
+                    console.warn("Firestore addProduct error:", err);
+                }
+            }
+
+            showToast(`🎉 [${name}] 적금 상품이 성공적으로 신규 등록되었습니다!`, 'success');
+            closeAllModals();
+            elements.newProductForm.reset();
+            renderDashboard();
+            renderSavingsMasterTable();
+        });
+    }
+
     // ESC Key listener to close all modals
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
@@ -410,7 +483,7 @@ function setupEventListeners() {
     });
 
     // Close modals on overlay background click
-    [elements.depositModal, elements.scheduleModal, elements.productDetailModal].forEach(modal => {
+    [elements.depositModal, elements.scheduleModal, elements.productDetailModal, elements.newProductModal].forEach(modal => {
         if (modal) {
             modal.addEventListener('click', (e) => {
                 if (e.target === modal) closeAllModals();
@@ -425,6 +498,7 @@ function closeAllModals() {
     if (elements.depositModal) elements.depositModal.classList.remove('active');
     if (elements.scheduleModal) elements.scheduleModal.classList.remove('active');
     if (elements.productDetailModal) elements.productDetailModal.classList.remove('active');
+    if (elements.newProductModal) elements.newProductModal.classList.remove('active');
 }
 
 // Embedded Multi-Tab Fallback Data
@@ -764,6 +838,15 @@ function parseGridArray(grid) {
     }
 
     state.products = productCols;
+
+    // Recalculate totalDeposited for each product based on actual deposited records
+    state.products.forEach(p => {
+        const depositedSum = p.records.filter(r => r.status === 'deposited').reduce((sum, r) => sum + r.amount, 0);
+        if (depositedSum > 0) {
+            p.totalDeposited = depositedSum;
+        }
+    });
+
     const totalAccumulatedSavings = state.products.reduce((s, p) => s + p.totalDeposited, 0) || accumulatedSavingsFromKPI;
     const totalMatured = state.maturedList.reduce((s, m) => s + m.amount, 0) || maturityTotalFromKPI;
 

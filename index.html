@@ -152,9 +152,14 @@
                 <div class="split-left">
                     <div class="section-title">
                         <h2><i class="fa-solid fa-money-check-dollar"></i> 진행 중인 적금 상품 리스트</h2>
-                        <button class="btn btn-outline btn-sm" id="btn-open-deposit-modal">
-                            <i class="fa-solid fa-plus"></i> 입금 내역 신규 등록
-                        </button>
+                        <div style="display:flex; gap:0.4rem;">
+                            <button class="btn btn-teal btn-sm" id="btn-open-new-product-modal" style="background:#10b981; border-color:#059669; color:#fff; font-weight:700;">
+                                <i class="fa-solid fa-plus-circle"></i> + 적금 상품 신규 등록
+                            </button>
+                            <button class="btn btn-outline btn-sm" id="btn-open-deposit-modal">
+                                <i class="fa-solid fa-plus"></i> 입금 내역 신규 등록
+                            </button>
+                        </div>
                     </div>
                     <div class="products-grid" id="products-container">
                         <!-- Dynamic Injected Product Cards -->
@@ -679,6 +684,63 @@ function highlightDuplicates() {
                 <div class="modal-actions">
                     <button type="button" class="btn btn-outline" id="btn-sched-cancel">취소</button>
                     <button type="submit" class="btn btn-teal"><i class="fa-solid fa-floppy-disk"></i> 시트에 저장(0)</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- New Product Registration Modal -->
+    <div class="modal-overlay" id="new-product-modal">
+        <div class="modal-content card" style="max-width: 520px;">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-plus-circle"></i> 진행 중인 적금 상품 신규 등록</h3>
+                <button class="btn-close" id="new-product-modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="new-product-form" class="modal-form">
+                <div class="input-group">
+                    <label>적금/저축 상품명</label>
+                    <input type="text" id="new-prod-name" placeholder="예: 신한 청년적금, 카카오뱅크 아이적금" required>
+                </div>
+                <div class="schedule-form-row">
+                    <div class="input-group">
+                        <label>이율 / 금리</label>
+                        <input type="text" id="new-prod-rate" placeholder="예: 5.0%, 10%" value="5.0%">
+                    </div>
+                    <div class="input-group">
+                        <label>소유자 (명의)</label>
+                        <select id="new-prod-owner">
+                            <option value="주원">주원</option>
+                            <option value="지헌">지헌</option>
+                            <option value="준영">준영</option>
+                            <option value="가족공용">가족공용</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="schedule-form-row">
+                    <div class="input-group">
+                        <label>매달 목표 납입액(원)</label>
+                        <input type="number" id="new-prod-monthly" placeholder="300000" value="300000" required>
+                    </div>
+                    <div class="input-group">
+                        <label>현재 초기 입금액(원)</label>
+                        <input type="number" id="new-prod-initial" placeholder="0" value="0">
+                    </div>
+                </div>
+                <div class="schedule-form-row">
+                    <div class="input-group">
+                        <label>시작일</label>
+                        <input type="text" id="new-prod-start" placeholder="2026. 8. 11" value="2026. 8. 11">
+                    </div>
+                    <div class="input-group">
+                        <label>만기일</label>
+                        <input type="text" id="new-prod-end" placeholder="2027. 8. 11" value="2027. 8. 11">
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-outline" id="btn-new-prod-cancel">취소</button>
+                    <button type="submit" class="btn btn-teal" style="background:#10b981; border-color:#059669; color:#fff; font-weight:700;">
+                        <i class="fa-solid fa-check"></i> 적금 상품 즉시 등록
+                    </button>
                 </div>
             </form>
         </div>
