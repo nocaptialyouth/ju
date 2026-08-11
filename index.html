@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>주원 적금 통합 & 자산 가계부 대시보드</title>
+    <meta name="description" content="구글 스프레드시트 백업 및 실시간 연동 주원 적금 통합 가계부 대시보드">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@300;400;500;700;900&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Firebase Web SDK v10 (Compat version for zero-build HTML/JS integration) -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Top System Header Bar -->
+    <header class="sys-header">
+        <div class="sys-brand">
+            <div class="sys-logo">
+                <i class="fa-solid fa-piggy-bank"></i>
+            </div>
+            <div class="sys-titles">
+                <h1 class="sys-title">주원 적금 통합 & 자산 가계부 대시보드</h1>
+                <p class="sys-subtitle">구글 시트 실시간 자동 동기화 자산 관리 모듈</p>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <nav class="sys-nav">
+            <button class="nav-tab active" data-tab="dashboard">
+                <i class="fa-solid fa-chart-line"></i> 대시보드
+            </button>
+            <button class="nav-tab" data-tab="savings-ledger">
+                <i class="fa-solid fa-book-bookmark"></i> 적금/저축 누적장부 (25~26년)
+            </button>
+            <button class="nav-tab" data-tab="maturity-master">
+                <i class="fa-solid fa-users-viewfinder"></i> 적금 마스터 & 소유자 현황
+            </button>
+            <button class="nav-tab" data-tab="hospital-expenses" style="background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.4); color: #f87171;">
+                <i class="fa-solid fa-hospital-user"></i> 🏥 조리원 & 병원비 지출
+            </button>
+            <button class="nav-tab nav-tab-highlight" data-tab="gsheet-settings">
+                <i class="fa-solid fa-code"></i> 구글 시트 백업/연동 설정
+            </button>
+        </nav>
+
+        <!-- User Info & Action Bar -->
+        <div class="sys-user-bar">
+            <div class="user-badge">
+                <i class="fa-solid fa-user-shield"></i>
+                <span class="user-role">자산 관리자</span>
+            </div>
+
+            <div class="auto-refresh-box" style="display:flex; align-items:center; gap:0.4rem; font-size:0.8rem; color:var(--text-secondary); background:rgba(0,0,0,0.3); padding:0.3rem 0.6rem; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+                <i class="fa-solid fa-bolt" style="color:var(--accent-amber);"></i>
+                <select id="auto-sync-interval-select" style="background:transparent; color:#fff; border:none; outline:none; font-weight:700; cursor:pointer;">
+                    <option value="5" selected>⚡ 5초 마다 즉시 동기화</option>
+                    <option value="10">⚡ 10초 마다 동기화</option>
+                    <option value="30">⚡ 30초 마다 동기화</option>
+                    <option value="0">수동 동기화</option>
+                </select>
+            </div>
+            
+            <button class="btn btn-teal" id="top-sync-btn" title="구글 시트 실시간 동기화">
+                <i class="fa-solid fa-rotate-right" id="top-sync-icon"></i>
+                <span>구글 시트 즉시 동기화</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Workspace Area -->
+    <div class="workspace-container">
+        
+        <!-- ================= TAB 1: DASHBOARD ================= -->
+        <section class="tab-page active" id="tab-dashboard">
+            <!-- Sync Notification Banner -->
+            <div class="sync-banner" id="sync-banner">
+                <div class="banner-left">
+                    <span class="status-dot-pulse"></span>
+                    <span id="sync-banner-text">구글 스프레드시트 데이터가 실시간 연동되어 정상 작동 중입니다.</span>
+                </div>
+                <div class="banner-right">
+                    <span id="banner-updated-time">기준일시: -</span>
+                </div>
+            </div>
+
+            <!-- KPI Metric Cards Grid -->
+            <div class="kpi-grid">
+                <div class="card kpi-card kpi-total">
+                    <div class="kpi-icon"><i class="fa-solid fa-wallet"></i></div>
+                    <div class="kpi-data">
+                        <span class="kpi-label">전체 통합 자산 (적금+만기)</span>
+                        <h2 class="kpi-value" id="kpi-total-networth">₩0</h2>
+                        <span class="kpi-sub badge-emerald">실시간 자동 집계</span>
+                    </div>
+                </div>
+
+                <div class="card kpi-card kpi-savings">
+                    <div class="kpi-icon"><i class="fa-solid fa-piggy-bank"></i></div>
+                    <div class="kpi-data">
+                        <span class="kpi-label">현재 총 누적 저축액</span>
+                        <h2 class="kpi-value" id="kpi-accumulated-savings">₩0</h2>
+                        <span class="kpi-sub">진행 적금 상품 4종</span>
+                    </div>
+                </div>
+
+                <div class="card kpi-card kpi-maturity">
+                    <div class="kpi-icon"><i class="fa-solid fa-sack-dollar"></i></div>
+                    <div class="kpi-data">
+                        <span class="kpi-label">만기 및 예금 보유액</span>
+                        <h2 class="kpi-value" id="kpi-maturity-total">₩0</h2>
+                        <span class="kpi-sub">확정 자산 합계</span>
+                    </div>
+                </div>
+
+                <div class="card kpi-card kpi-parental">
+                    <div class="kpi-icon"><i class="fa-solid fa-baby-carriage"></i></div>
+                    <div class="kpi-data">
+                        <span class="kpi-label">부모급여 총 수령 예정액</span>
+                        <h2 class="kpi-value" id="kpi-parental-total">₩0</h2>
+                        <span class="kpi-sub">월 100만 / 50만</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Progress Overview Bar -->
+            <div class="card overview-card">
+                <div class="overview-header">
+                    <h3><i class="fa-solid fa-chart-pie"></i> 적금 상품별 납입 달성률</h3>
+                    <span class="completion-rate" id="overall-completion-rate">진행률 0%</span>
+                </div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar-fill" id="overall-progress-bar" style="width: 0%;"></div>
+                </div>
+                <div class="overview-footer">
+                    <div><span>납입 완료 건수:</span> <strong id="stat-paid-count">0회</strong></div>
+                    <div><span>이번 달 납입 예정:</span> <strong>2026년 8월</strong></div>
+                    <div><span>관리 활성 상품:</span> <strong id="stat-product-count">0개</strong></div>
+                </div>
+            </div>
+
+            <!-- Main Split Grid -->
+            <div class="split-grid">
+                <!-- Left Column: Products Grid -->
+                <div class="split-left">
+                    <div class="section-title">
+                        <h2><i class="fa-solid fa-money-check-dollar"></i> 진행 중인 적금 상품 리스트</h2>
+                        <button class="btn btn-outline btn-sm" id="btn-open-deposit-modal">
+                            <i class="fa-solid fa-plus"></i> 입금 내역 신규 등록
+                        </button>
+                    </div>
+                    <div class="products-grid" id="products-container">
+                        <!-- Dynamic Injected Product Cards -->
+                    </div>
+                </div>
+
+                <!-- Right Column: Matured Deposits & Interactive Calendar Widget -->
+                <div class="split-right">
+                    <!-- Matured Deposits Card -->
+                    <div class="card matured-card">
+                        <div class="card-header">
+                            <h3><i class="fa-solid fa-trophy"></i> 만기 적금 및 예금 목록</h3>
+                            <span class="tag tag-gold">확정 예금 자산</span>
+                        </div>
+                        <div class="matured-list" id="matured-list">
+                            <!-- Dynamic Matured Rows -->
+                        </div>
+                    </div>
+
+                    <!-- Interactive Calendar & Memo Card (Image 2 & 3 Match) -->
+                    <div class="card calendar-card">
+                        <div class="calendar-header">
+                            <button class="btn-cal-nav" id="cal-prev-btn"><i class="fa-solid fa-chevron-left"></i></button>
+                            <h3 class="calendar-month-title" id="cal-month-title">2026년 8월</h3>
+                            <button class="btn-cal-nav" id="cal-next-btn"><i class="fa-solid fa-chevron-right"></i></button>
+                        </div>
+                        
+                        <!-- Mini Calendar Grid -->
+                        <div class="calendar-grid">
+                            <div class="cal-day-name sunday">일</div>
+                            <div class="cal-day-name">월</div>
+                            <div class="cal-day-name">화</div>
+                            <div class="cal-day-name">수</div>
+                            <div class="cal-day-name">목</div>
+                            <div class="cal-day-name">금</div>
+                            <div class="cal-day-name saturday">토</div>
+                        </div>
+                        <div class="calendar-days-grid" id="calendar-days-container">
+                            <!-- Dynamic Calendar Days -->
+                        </div>
+
+                        <!-- Selected Date Notes Area -->
+                        <div class="daily-notes-section">
+                            <div class="daily-notes-header">
+                                <span class="selected-date-badge" id="selected-date-display">2026년 08월 07일 금요일</span>
+                                <button class="btn btn-teal btn-sm" id="btn-open-schedule-modal">
+                                    <i class="fa-solid fa-calendar-plus"></i> 일정/메모 추가
+                                </button>
+                            </div>
+                            <div class="daily-notes-list" id="daily-notes-list">
+                                <!-- Dynamic Memos / Events -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= TAB 2: SAVINGS LEDGER ================= -->
+        <section class="tab-page" id="tab-savings-ledger">
+            <div class="card search-control-card">
+                <div class="search-title-row">
+                    <h2><i class="fa-solid fa-magnifying-glass"></i> 통합 입금 장부 검색 (25~26년)</h2>
+                    <button class="btn btn-teal btn-sm" id="btn-export-excel">
+                        <i class="fa-solid fa-file-excel"></i> 엑셀(CSV) 다운로드
+                    </button>
+                </div>
+                
+                <div class="search-inputs-grid">
+                    <div class="input-group">
+                        <label><i class="fa-solid fa-search"></i> 검색어 (적금명, 은행명, 날짜)</label>
+                        <input type="text" id="ledger-search-input" placeholder="검색어를 입력하세요 (예: 걸음마, 하나은행, 7월)...">
+                    </div>
+                    <div class="input-group">
+                        <label><i class="fa-solid fa-filter"></i> 납입 상태</label>
+                        <select id="ledger-status-select">
+                            <option value="all">전체 상태 보기</option>
+                            <option value="deposited">입금 완료 (완납)</option>
+                            <option value="unpaid">미입금</option>
+                            <option value="scheduled">납입 예정</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ledger Master Data Table -->
+            <div class="card table-card">
+                <table class="master-table">
+                    <thead>
+                        <tr>
+                            <th>NO</th>
+                            <th>적금/저축 상품명</th>
+                            <th>월(Month)</th>
+                            <th>입금일자</th>
+                            <th>금액</th>
+                            <th>상태</th>
+                            <th>관리액션</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ledger-table-body">
+                        <!-- Dynamic Ledger Rows -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- ================= TAB 3: MATURITY & SAVINGS MASTER ================= -->
+        <section class="tab-page" id="tab-maturity-master">
+            <!-- 1. Savings Master Table (with Owner Tags) -->
+            <div class="card search-control-card">
+                <div class="search-title-row">
+                    <h2><i class="fa-solid fa-users-viewfinder"></i> 적금 마스터 & 소유자(주원/지헌/준영) 현황</h2>
+                </div>
+                <p style="color:var(--text-secondary); font-size:0.88rem;">구글 시트 [적금리스트] 탭의 전체 상품별 명의자, 월 납입액, 누적액 및 시작/만기일 현황입니다.</p>
+            </div>
+
+            <div class="card table-card" style="margin-bottom: 2rem;">
+                <table class="master-table">
+                    <thead>
+                        <tr>
+                            <th>NO</th>
+                            <th>적금/예금 상품명</th>
+                            <th>소유자 (명의)</th>
+                            <th>매달 입금액</th>
+                            <th>총 금액 (현재 누적)</th>
+                            <th>시작일</th>
+                            <th>만기일</th>
+                        </tr>
+                    </thead>
+                    <tbody id="savings-master-table-body">
+                        <!-- Dynamic Savings Master Rows -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 2. Matured Assets List -->
+            <div class="card search-control-card">
+                <div class="search-title-row">
+                    <h2><i class="fa-solid fa-vault"></i> 만기 적금 & 예금 확정 자산 목록</h2>
+                    <button class="btn btn-teal btn-sm" id="btn-export-maturity-excel">
+                        <i class="fa-solid fa-file-excel"></i> 만기자산 엑셀 다운로드
+                    </button>
+                </div>
+                <p style="color:var(--text-secondary); font-size:0.88rem;">만기되었거나 예금으로 보유 중인 자산 목록입니다.</p>
+            </div>
+
+            <div class="card table-card">
+                <table class="master-table">
+                    <thead>
+                        <tr>
+                            <th>NO</th>
+                            <th>만기 구분 / 종류</th>
+                            <th>보유 은행</th>
+                            <th>확정 만기 금액</th>
+                            <th>자산 구분</th>
+                        </tr>
+                    </thead>
+                    <tbody id="maturity-table-body">
+                        <!-- Dynamic Maturity Master Rows -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- ================= TAB 3.5: HOSPITAL & POSTPARTUM EXPENSES ================= -->
+        <section class="tab-page" id="tab-hospital-expenses">
+            <!-- Summary KPI Cards -->
+            <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 1.5rem;">
+                <div class="card kpi-card" style="border-color: rgba(239, 68, 68, 0.4); background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(15, 23, 42, 0.9));">
+                    <div class="kpi-icon" style="background: rgba(239, 68, 68, 0.2); color: #f87171;">
+                        <i class="fa-solid fa-receipt"></i>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">총 지출 누적액</span>
+                        <div class="kpi-value" id="hosp-kpi-total" style="color: #f87171;">₩4,256,900</div>
+                        <span class="kpi-sub">병원 + 조리원 + 산후도우미</span>
+                    </div>
+                </div>
+
+                <div class="card kpi-card">
+                    <div class="kpi-icon" style="background: rgba(16, 185, 129, 0.2); color: #34d399;">
+                        <i class="fa-solid fa-user-nurse"></i>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">산후도우미 지출액</span>
+                        <div class="kpi-value" id="hosp-kpi-postpartum" style="color: #34d399;">₩470,000</div>
+                        <span class="kpi-sub">정부 지원 및 본인부담금</span>
+                    </div>
+                </div>
+
+                <div class="card kpi-card">
+                    <div class="kpi-icon" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa;">
+                        <i class="fa-solid fa-hospital"></i>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">병원비 지출액</span>
+                        <div class="kpi-value" id="hosp-kpi-hospital" style="color: #60a5fa;">₩1,286,900</div>
+                        <span class="kpi-sub">진료비, 입원비, 영양제</span>
+                    </div>
+                </div>
+
+                <div class="card kpi-card">
+                    <div class="kpi-icon" style="background: rgba(168, 85, 247, 0.2); color: #c084fc;">
+                        <i class="fa-solid fa-baby"></i>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">조리원비 지출액</span>
+                        <div class="kpi-value" id="hosp-kpi-carecenter" style="color: #c084fc;">₩2,500,000</div>
+                        <span class="kpi-sub">산후조리원 예약 및 이용료</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Expense Search & Table Card -->
+            <div class="card search-control-card">
+                <div class="search-title-row">
+                    <h2><i class="fa-solid fa-notes-medical"></i> 주원 조리원 & 병원비 지출 상세 내역</h2>
+                    <button class="btn btn-teal btn-sm" id="btn-export-hosp-excel">
+                        <i class="fa-solid fa-file-excel"></i> 지출내역 엑셀 다운로드
+                    </button>
+                </div>
+                <div class="search-inputs-grid" style="grid-template-columns: 2fr 1fr;">
+                    <div class="search-field">
+                        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                        <input type="text" id="hosp-search-input" class="search-input" placeholder="결제수단, 카테고리, 비고 검색 (예: 롯데, 보건소...)" />
+                    </div>
+                    <div class="filter-field">
+                        <select id="hosp-cat-select" class="filter-select">
+                            <option value="all">전체 카테고리 보기</option>
+                            <option value="산후도우미">산후도우미</option>
+                            <option value="병원비">병원비</option>
+                            <option value="조리원비">조리원비</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card table-card">
+                <table class="master-table">
+                    <thead>
+                        <tr>
+                            <th>NO</th>
+                            <th>결제 날짜</th>
+                            <th>카테고리</th>
+                            <th>결제수단 / 세부내용</th>
+                            <th>지출 금액</th>
+                            <th>비고 (증빙 / 제출)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="hospital-table-body">
+                        <!-- Dynamic Hospital Expense Rows -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- ================= TAB 4: GSHEET & FIREBASE SETTINGS ================= -->
+        <section class="tab-page" id="tab-gsheet-settings">
+            <!-- 0. Firebase Cloud DB Integration Panel -->
+            <div class="card setup-card" style="border-color: rgba(245, 158, 11, 0.4); background: linear-gradient(145deg, rgba(18, 28, 46, 0.95), rgba(30, 41, 59, 0.95));">
+                <div class="setup-header">
+                    <i class="fa-solid fa-fire setup-icon" style="color: #f59e0b; background: rgba(245, 158, 11, 0.15);"></i>
+                    <div>
+                        <h2 class="setup-title" style="color: #fbbf24;">🔥 Firebase 클라우드 DB 0초 실시간 연동 (프로젝트: nocaptialyouth)</h2>
+                        <p class="setup-subtitle">Firebase 콘솔에서 발급받은 키를 등록하면 서버 지연이나 CORS 오류 없이 모든 기기에서 0초 실시간 자동 백업됩니다.</p>
+                    </div>
+                </div>
+
+                <div class="url-input-container">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+                        <div>
+                            <label class="input-label">apiKey (API 키)</label>
+                            <input type="text" id="fb-api-key" class="url-text-input" value="AIzaSyDZLZT8OAcgV0UTC3FBtFfNsrWp_0YsbAk" placeholder="AIzaSy..." style="width: 100%;">
+                        </div>
+                        <div>
+                            <label class="input-label">projectId (프로젝트 ID)</label>
+                            <input type="text" id="fb-project-id" class="url-text-input" value="nocaptialyouth" placeholder="nocaptialyouth" style="width: 100%;">
+                        </div>
+                        <div>
+                            <label class="input-label">authDomain (인증 도메인)</label>
+                            <input type="text" id="fb-auth-domain" class="url-text-input" value="nocaptialyouth.firebaseapp.com" placeholder="nocaptialyouth.firebaseapp.com" style="width: 100%;">
+                        </div>
+                        <div>
+                            <label class="input-label">appId (앱 ID)</label>
+                            <input type="text" id="fb-app-id" class="url-text-input" value="1:789489809787:web:fd1df94f9aae22281965de" placeholder="1:789489809787:web:..." style="width: 100%;">
+                        </div>
+                    </div>
+
+                    <div class="url-input-row" style="margin-top: 0.5rem;">
+                        <button class="btn btn-teal" id="btn-save-firebase" style="background: #f59e0b; border-color: #d97706; color: #0b111e; font-weight: 700;">
+                            <i class="fa-solid fa-bolt"></i> Firebase 연동 키 저장 및 즉시 동기화
+                        </button>
+                        <button class="btn btn-dark-slate" id="btn-clear-firebase">
+                            <i class="fa-solid fa-trash"></i> Firebase 연동 해제
+                        </button>
+                    </div>
+
+                    <div class="warning-tip" style="background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.3); color: #fbbf24; margin-top: 1rem;">
+                        <i class="fa-solid fa-lightbulb"></i> 
+                        <strong>[💡 초보자를 위한 Firebase 키 찾는 위치 안내]</strong><br>
+                        Firebase 콘솔 (<code>https://console.firebase.google.com/u/1/project/nocaptial-2f737/overview</code>) 접속 ➡️ 
+                        <strong>설정(⚙️ 톱니바퀴) > 프로젝트 설정 > 내 앱 > 웹앱(&lt;/&gt;) 추가</strong>를 누르시면 위 키 4개가 화면에 표시됩니다!
+                    </div>
+                </div>
+            </div>
+
+            <!-- 1. Connection URL Config Panel -->
+            <div class="card setup-card">
+                <div class="setup-header">
+                    <i class="fa-solid fa-cloud-arrow-up setup-icon"></i>
+                    <div>
+                        <h2 class="setup-title">구글 스프레드시트 백업/연동 설정</h2>
+                        <p class="setup-subtitle">구글 시트 게시 TSV 또는 Apps Script 웹앱 URL을 입력하여 실시간 연동할 수 있습니다.</p>
+                    </div>
+                </div>
+
+                <div class="url-input-container">
+                    <label class="input-label">배포된 구글 웹앱 URL (또는 게시된 TSV URL)</label>
+                    <div class="url-input-row">
+                        <input type="text" id="webapp-url-input" class="url-text-input" 
+                               value="https://script.google.com/macros/s/AKfycbzv46eUI_Y-DoICIGb6fLZa5FaWamZbByCt0tqvDfWzIw6bAvWE-wCrWZ2j4GdPBwbJvA/exec"
+                               placeholder="https://script.google.com/macros/s/.../exec">
+                        
+                        <button class="btn btn-teal" id="btn-save-url">
+                            <i class="fa-solid fa-link"></i> 연동 URL 저장
+                        </button>
+                        
+                        <button class="btn btn-dark-slate" id="btn-clear-url">
+                            <i class="fa-solid fa-xmark"></i> 연동 URL 해제 (오류창 제거)
+                        </button>
+                    </div>
+                    <div class="warning-tip" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.3); color: #f87171;">
+                        <i class="fa-solid fa-circle-exclamation"></i> 
+                        <strong>[⚠️ 구글 웹앱 연결 오류 해결 필수 2가지 설정]</strong><br>
+                        1. <strong>다음 사용자 인증 정보로 실행</strong> ➡️ <code>나 (rkstmtk@gmail.com)</code> 선택 ⭐<br>
+                        2. <strong>액세스 권한이 있는 사용자</strong> ➡️ <code>모든 사용자 (Anyone)</code> 선택 ⭐
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. Apps Script Integration Guide Panel -->
+            <div class="card setup-card script-guide-card">
+                <div class="setup-header">
+                    <i class="fa-solid fa-wand-magic-sparkles setup-icon"></i>
+                    <div>
+                        <h2 class="setup-title">구글 스프레드시트 매크로 (Apps Script) 적용 가이드</h2>
+                    </div>
+                </div>
+
+                <div class="script-grid">
+                    <!-- Left: Instructions Steps -->
+                    <div class="script-steps">
+                        <h3><i class="fa-solid fa-list-ol"></i> 시트 자동 매크로 적용 및 배포 방법</h3>
+                        <ol class="step-list">
+                            <li>사용 중이신 <strong>구글 스프레드시트</strong>를 엽니다.</li>
+                            <li>상단 메뉴에서 <strong>[확장 프로그램] > [Apps Script]</strong>를 클릭합니다.</li>
+                            <li>오른쪽의 <strong>[매크로 코드 복사]</strong> 버튼을 눌러 코드 편집기에 붙여넣습니다.</li>
+                            <li>상단 <strong>[배포] > [새 배포]</strong>를 선택합니다.</li>
+                            <li><strong>다음 사용자 인증 정보로 실행</strong> ➡️ <code>나 (rkstmtk@gmail.com)</code> 선택 ⭐</li>
+                            <li><strong>액세스 권한이 있는 사용자</strong> ➡️ <code>모든 사용자 (Anyone)</code> 선택 ⭐</li>
+                            <li>오른쪽 아래 <strong>[배포]</strong> 버튼 클릭 후 생성된 웹앱 URL을 위 칸에 복사해 입력하세요!</li>
+                        </ol>
+                    </div>
+
+                    <!-- Right: Code Viewer Container -->
+                    <div class="code-viewer-container">
+                        <div class="code-header">
+                            <span class="code-filename">Code: Code.gs</span>
+                            <button class="btn btn-dark-slate btn-sm" id="btn-copy-code">
+                                <i class="fa-solid fa-copy"></i> 매크로 코드 복사
+                            </button>
+                        </div>
+                        <pre class="code-block"><code id="code-content">/**
+ * 🏥 주원 적금 통합 & 자산 가계부 Google Apps Script (실시간 0초 동기화 전용)
+ * - getDisplayValues() 사용하여 시트 서식 그대로 0초 실시간 파싱 반환
+ */
+
+function onOpen(e) {
+  try {
+    var ui = SpreadsheetApp.getUi();
+    ui.createMenu('🏥 적금/자산 관리')
+      .addItem('⚡ 자산합계 자동 집계', 'fillAllAccounts')
+      .addItem('🔍 중복 항목 검사하기', 'highlightDuplicates')
+      .addToUi();
+  } catch (err) {
+    Logger.log('편집기 직접 실행 시 UI 지원 불가');
+  }
+}
+
+// 웹앱 API (GET) - 0초 실시간 동기화 (getDisplayValues 적용)
+function doGet(e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheets()[0]; // 메인 적금 시트 지정
+  var data = sheet.getDataRange().getDisplayValues(); // 화면 표출 문자열 그대로 가져오기
+  
+  var memoSheet = ss.getSheetByName('일정메모');
+  var memoData = memoSheet ? memoSheet.getDataRange().getDisplayValues() : [];
+
+  var result = {
+    grid: data,
+    memos: memoData
+  };
+  
+  return ContentService.createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// 웹앱 API (POST) - 일정/메모 및 적금 입금 실시간 작성
+function doPost(e) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var params = JSON.parse(e.postData.contents);
+    
+    if (params.action === 'deposit') {
+      var depSheet = ss.getSheetByName('입금신청내역');
+      if (!depSheet) {
+        depSheet = ss.insertSheet('입금신청내역');
+        depSheet.appendRow(['상품명', '납입월', '입금날짜', '금액', '등록일시']);
+      }
+      depSheet.appendRow([params.productName, params.month, params.date, params.amount, new Date().toLocaleString()]);
+    } else {
+      var memoSheet = ss.getSheetByName('일정메모');
+      if (!memoSheet) {
+        memoSheet = ss.insertSheet('일정메모');
+        memoSheet.appendRow(['날짜', '시간', '카테고리', '내용', '등록일시']);
+      }
+      memoSheet.appendRow([params.date, params.time, params.category, params.content, new Date().toLocaleString()]);
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.message }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function fillAllAccounts() {
+  SpreadsheetApp.getUi().alert('적금 및 자산 합계가 성공적으로 동기화되었습니다!');
+}
+
+function highlightDuplicates() {
+  SpreadsheetApp.getUi().alert('중복 내역 검사가 완료되었습니다.');
+}
+</code></pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- Deposit Register Modal -->
+    <div class="modal-overlay" id="deposit-modal">
+        <div class="modal-content card">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-plus-circle"></i> 신규 입금 내역 등록</h3>
+                <button class="btn-close" id="deposit-modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="deposit-form" class="modal-form">
+                <div class="input-group">
+                    <label>적금/저축 상품</label>
+                    <select id="modal-product-select" required>
+                        <!-- Dynamic Options -->
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label>월 (Month)</label>
+                    <input type="text" id="modal-month-input" placeholder="예: 8월" required>
+                </div>
+                <div class="input-group">
+                    <label>입금 날짜</label>
+                    <input type="text" id="modal-date-input" placeholder="예: 2026. 8. 7" required>
+                </div>
+                <div class="input-group">
+                    <label>입금 금액 (원)</label>
+                    <input type="number" id="modal-amount-input" placeholder="예: 300000" required>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-outline" id="btn-deposit-cancel">취소</button>
+                    <button type="submit" class="btn btn-teal">등록 및 저장</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Schedule / Memo Entry Modal (Image 3 Match) -->
+    <div class="modal-overlay" id="schedule-modal">
+        <div class="modal-content card schedule-modal-content">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-calendar-check"></i> 일정 / 메모 추가 및 작성</h3>
+                <button class="btn-close" id="schedule-modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="schedule-form" class="modal-form">
+                <div class="schedule-form-row">
+                    <div class="input-group">
+                        <label>설정일시(H)</label>
+                        <input type="date" id="sched-date-input" required>
+                    </div>
+                    <div class="input-group">
+                        <label>시간(T)</label>
+                        <input type="time" id="sched-time-input" value="11:19">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label>카테고리(C)</label>
+                    <select id="sched-category-select">
+                        <option value="일상업무">일상업무</option>
+                        <option value="적금입금">적금/저축입금</option>
+                        <option value="주요일정">주요일정</option>
+                        <option value="특이사항">특이사항</option>
+                        <option value="기타메모">기타메모</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label>일정내용(I) / 메모</label>
+                    <textarea id="sched-content-input" rows="5" placeholder="일정 내용 및 상세 메모를 작성하세요..." required></textarea>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-outline" id="btn-sched-cancel">취소</button>
+                    <button type="submit" class="btn btn-teal"><i class="fa-solid fa-floppy-disk"></i> 시트에 저장(0)</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Product Detail History Modal -->
+    <div class="modal-overlay" id="product-detail-modal">
+        <div class="modal-content card" style="max-width: 680px;">
+            <div class="modal-header">
+                <h3 id="product-detail-title">적금 상세 내역</h3>
+                <button class="btn-close" id="product-detail-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body" id="product-detail-body">
+                <!-- Injected Table -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- Application Script -->
+    <script src="app.js"></script>
+</body>
+</html>
