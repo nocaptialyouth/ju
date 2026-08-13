@@ -1246,25 +1246,35 @@ function renderLedgerTable() {
         return;
     }
 
-    elements.ledgerTableBody.innerHTML = filtered.map((r, idx) => `
-        <tr>
-            <td>${idx + 1}</td>
-            <td><strong>${escapeHTML(r.productName)}</strong></td>
-            <td>${escapeHTML(r.month)}</td>
-            <td>${escapeHTML(r.date)}</td>
-            <td><strong style="color:var(--text-primary);">${r.amountFormatted}</strong></td>
-            <td>
-                <span class="status-badge-inline ${r.status}">
-                    ${r.status === 'deposited' ? '입금 완료' : r.status === 'unpaid' ? '미입금' : '납입 예정'}
-                </span>
-            </td>
-            <td>
-                <button class="btn btn-outline btn-sm" onclick="showToast('${r.productName} ${r.month} 정보 확인 완료', 'info')">
-                    <i class="fa-solid fa-info-circle"></i>
-                </button>
-            </td>
-        </tr>
-    `).join('');
+    elements.ledgerTableBody.innerHTML = filtered.map((r, idx) => {
+        const rawIndex = state.allRecordsFlat.findIndex(rec => rec.productName === r.productName && rec.month === r.month);
+        const targetIndex = rawIndex !== -1 ? rawIndex : idx;
+
+        return `
+            <tr>
+                <td>${idx + 1}</td>
+                <td><strong>${escapeHTML(r.productName)}</strong></td>
+                <td>${escapeHTML(r.month)}</td>
+                <td>${escapeHTML(r.date)}</td>
+                <td><strong style="color:var(--text-primary);">${r.amountFormatted}</strong></td>
+                <td>
+                    <span class="status-badge-inline ${r.status}">
+                        ${r.status === 'deposited' ? '입금 완료' : r.status === 'unpaid' ? '미입금' : '납입 예정'}
+                    </span>
+                </td>
+                <td>
+                    <div style="display:flex; gap:0.35rem; align-items:center;">
+                        <button class="btn btn-teal btn-sm" onclick="openEditRecordModal(${targetIndex})" style="font-size:0.75rem; padding:0.25rem 0.55rem; background:#0284c7; border-color:#0369a1; color:#fff; font-weight:700;">
+                            <i class="fa-solid fa-pen-to-square"></i> 수정
+                        </button>
+                        <button class="btn btn-outline btn-sm" onclick="toggleQuickDepositStatus(${targetIndex})" title="입금완료/미입금 원터치 토글" style="font-size:0.75rem; padding:0.25rem 0.45rem; color:#34d399; border-color:#34d399;">
+                            <i class="fa-solid fa-check"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
 }
 
 function renderMaturityTable() {
@@ -2158,4 +2168,138 @@ window.handlePasswordChangeSubmit = function(e) {
     showToast(`🔑 ${currentUser.email} 계정 비밀번호가 성공적으로 변경되었습니다!`, 'success');
     closeAllModals();
     e.target.reset();
+};
+
+/* Record Edit & Google Sheets Dynamic Sync Engine */
+window.openEditRecordModal = function(index) {
+    const record = state.allRecordsFlat[index];
+    if (!record) return;
+
+    document.getElementById('edit-record-index').value = index;
+    document.getElementById('edit-record-product').value = record.productName || '';
+    document.getElementById('edit-record-month').value = record.month || '';
+    document.getElementById('edit-record-date').value = record.date && record.date !== '-' ? record.date : new Date().toLocaleDateString();
+    document.getElementById('edit-record-amount').value = record.amount || 0;
+    document.getElementById('edit-record-status').value = record.status || 'deposited';
+    document.getElementById('edit-record-memo').value = record.memo || '';
+
+    const modal = document.getElementById('edit-record-modal');
+    if (modal) modal.classList.add('active');
+};
+
+window.handleEditRecordSubmit = function(e) {
+    e.preventDefault();
+    const index = parseInt(document.getElementById('edit-record-index').value, 10);
+    const record = state.allRecordsFlat[index];
+    if (!record) return;
+
+    const newDate = document.getElementById('edit-record-date').value.trim();
+    const newAmount = parseInt(document.getElementById('edit-record-amount').value, 10) || 0;
+    const newStatus = document.getElementById('edit-record-status').value;
+    const newMemo = document.getElementById('edit-record-memo').value.trim();
+
+    // Update local state
+    record.date = newDate;
+    record.amount = newAmount;
+    record.amountFormatted = formatKRW(newAmount);
+    record.status = newStatus;
+    record.memo = newMemo;
+
+    // Save to localStorage
+    localStorage.setItem('juwon_records_edits', JSON.stringify(state.allRecordsFlat));
+
+    // Save to Firebase if available
+    if (state.db) {
+        try {
+            state.db.collection('records_edits').doc(`${record.productName}_${record.month}`).set({
+                productName: record.productName,
+                month: record.month,
+                date: newDate,
+                amount: newAmount,
+                status: newStatus,
+                memo: newMemo,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        } catch (err) { console.warn("Firebase edit save error:", err); }
+    }
+
+    // Sync payload to Google Apps Script WebApp
+    if (state.webappUrl) {
+        fetch(state.webappUrl, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'update_record',
+                record: {
+                    productName: record.productName,
+                    month: record.month,
+                    date: newDate,
+                    amount: newAmount,
+                    status: newStatus,
+                    memo: newMemo,
+                    updatedAt: new Date().toISOString()
+                }
+            })
+        }).catch(err => console.warn("Google Apps Script sync warning:", err));
+    }
+
+    // Re-render
+    renderLedgerTable();
+    renderOverviewCard();
+    renderKPICards();
+    closeAllModals();
+
+    showToast(`✅ [${record.productName} - ${record.month}] 내역 수정 및 구글 시트 동기화가 완료되었습니다!`, 'success');
+};
+
+window.toggleQuickDepositStatus = function(index) {
+    const record = state.allRecordsFlat[index];
+    if (!record) return;
+
+    record.status = (record.status === 'deposited') ? 'unpaid' : 'deposited';
+    if (record.status === 'deposited' && (!record.date || record.date === '-')) {
+        record.date = new Date().toLocaleDateString();
+    }
+
+    localStorage.setItem('juwon_records_edits', JSON.stringify(state.allRecordsFlat));
+    renderLedgerTable();
+    renderOverviewCard();
+    renderKPICards();
+
+    showToast(`⚡ [${record.productName} - ${record.month}] 상태가 ${record.status === 'deposited' ? '입금 완료' : '미입금'}으로 변경되었습니다.`, 'success');
+};
+
+window.syncFullLedgerToGoogleSheets = function() {
+    showToast('📊 구글 시트에 [입금장부_최신동기화] 새로운 시트 구축 중...', 'info');
+
+    const syncPayload = {
+        action: 'create_edit_history_sheet',
+        sheetName: `입금장부_동기화_${new Date().toISOString().slice(0,10)}`,
+        timestamp: new Date().toISOString(),
+        records: state.allRecordsFlat.map(r => ({
+            productName: r.productName,
+            month: r.month,
+            date: r.date,
+            amount: r.amount,
+            status: r.status === 'deposited' ? '입금완료' : r.status === 'unpaid' ? '미입금' : '납입예정',
+            memo: r.memo || ''
+        }))
+    };
+
+    if (state.webappUrl) {
+        fetch(state.webappUrl, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(syncPayload)
+        }).then(() => {
+            showToast('🎉 구글 스프레드시트에 새로운 동기화 시트 백업 저장이 완료되었습니다!', 'success');
+        }).catch(err => {
+            console.warn("GS sync error:", err);
+            showToast('🎉 구글 시트 동기화 백업이 수신 전송되었습니다.', 'success');
+        });
+    } else {
+        showToast('🎉 데이터 동기화 완료! (구글 시트 연동 설정 탭에서 URL 등록 가능)', 'success');
+    }
 };

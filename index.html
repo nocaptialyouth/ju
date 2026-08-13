@@ -429,9 +429,14 @@
             <div class="card search-control-card">
                 <div class="search-title-row">
                     <h2><i class="fa-solid fa-magnifying-glass"></i> 통합 입금 장부 검색 (25~26년)</h2>
-                    <button class="btn btn-teal btn-sm" id="btn-export-excel">
-                        <i class="fa-solid fa-file-excel"></i> 엑셀(CSV) 다운로드
-                    </button>
+                    <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+                        <button class="btn btn-teal btn-sm" onclick="syncFullLedgerToGoogleSheets()" style="background:#0284c7; border-color:#0369a1; color:#fff; font-weight:700;">
+                            <i class="fa-solid fa-table-list"></i> 📊 구글 시트 백업 시트 생성 & 동기화
+                        </button>
+                        <button class="btn btn-teal btn-sm" id="btn-export-excel">
+                            <i class="fa-solid fa-file-excel"></i> 엑셀(CSV) 다운로드
+                        </button>
+                    </div>
                 </div>
                 
                 <div class="search-inputs-grid">
@@ -1241,6 +1246,65 @@ function highlightDuplicates() {
                     </table>
                 </div>
             </div>
+        </div>
+    </div>
+    <!-- Dedicated Record Edit & Google Sheets Sync Modal -->
+    <div class="modal-overlay" id="edit-record-modal">
+        <div class="modal-content card" style="max-width: 480px; background: #0f172a; border: 1px solid #38bdf8; color: #fff; border-radius: 16px;">
+            <div class="modal-header" style="background: #0f172a; border-bottom: 1px solid #334155;">
+                <h3 style="color: #38bdf8; margin: 0; font-size: 1.15rem;"><i class="fa-solid fa-pen-to-square"></i> 입금 내역 데이터 수정 & 구글 시트 전송</h3>
+                <button class="btn-close" onclick="closeAllModals()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form onsubmit="handleEditRecordSubmit(event)" style="display: flex; flex-direction: column; gap: 1rem; padding-top: 0.75rem;">
+                <input type="hidden" id="edit-record-index">
+                
+                <div>
+                    <label style="font-size: 0.8rem; color: #cbd5e1; font-weight: 700; display: block; margin-bottom: 0.3rem;">적금/저축 상품명</label>
+                    <input type="text" id="edit-record-product" class="url-text-input" readonly style="width: 100%; background: #1e293b !important; color: #94a3b8 !important; border: 1px solid #334155 !important;">
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                    <div>
+                        <label style="font-size: 0.8rem; color: #cbd5e1; font-weight: 700; display: block; margin-bottom: 0.3rem;">회차 / 월</label>
+                        <input type="text" id="edit-record-month" class="url-text-input" readonly style="width: 100%; background: #1e293b !important; color: #94a3b8 !important; border: 1px solid #334155 !important;">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.8rem; color: #cbd5e1; font-weight: 700; display: block; margin-bottom: 0.3rem;">입금 일자</label>
+                        <input type="text" id="edit-record-date" class="url-text-input" placeholder="2026.08.13" required style="width: 100%; background: #1e293b !important; color: #fff !important; border: 1px solid #475569 !important;">
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                    <div>
+                        <label style="font-size: 0.8rem; color: #cbd5e1; font-weight: 700; display: block; margin-bottom: 0.3rem;">입금 금액 (원)</label>
+                        <input type="number" id="edit-record-amount" class="url-text-input" placeholder="300000" required style="width: 100%; background: #1e293b !important; color: #34d399 !important; font-weight: 800; border: 1px solid #475569 !important;">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.8rem; color: #cbd5e1; font-weight: 700; display: block; margin-bottom: 0.3rem;">납입 상태</label>
+                        <select id="edit-record-status" style="width: 100%; background: #1e293b; color: #fff; border: 1px solid #475569; padding: 0.55rem; border-radius: 8px; font-weight: 700; outline: none;">
+                            <option value="deposited">🟢 입금 완료</option>
+                            <option value="unpaid">🔴 미입금</option>
+                            <option value="scheduled">🟡 납입 예정</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label style="font-size: 0.8rem; color: #cbd5e1; font-weight: 700; display: block; margin-bottom: 0.3rem;">비고 / 결제 수단</label>
+                    <input type="text" id="edit-record-memo" class="url-text-input" placeholder="예: 카카오뱅크 자동이체, 새마을금고 현금입금..." style="width: 100%; background: #1e293b !important; color: #fff !important; border: 1px solid #475569 !important;">
+                </div>
+
+                <div style="background: rgba(2, 132, 199, 0.15); border: 1px solid rgba(2, 132, 199, 0.4); padding: 0.75rem 0.85rem; border-radius: 10px; font-size: 0.78rem; color: #7dd3fc; line-height: 1.4;">
+                    <i class="fa-solid fa-cloud-arrow-up"></i> <strong>구글 시트 실시간 연동:</strong> 저장 즉시 구글 스프레드시트에 내역이 실시간 동기화 입력됩니다.
+                </div>
+
+                <div class="modal-actions" style="margin-top: 0.5rem;">
+                    <button type="button" class="btn btn-outline" onclick="closeAllModals()">취소</button>
+                    <button type="submit" class="btn btn-teal" style="background: #0284c7; border-color: #0369a1; color: #fff; font-weight: 700;">
+                        <i class="fa-solid fa-check"></i> 수정사항 저장 & 구글 시트 전송
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 </body>
