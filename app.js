@@ -2172,8 +2172,14 @@ window.handlePasswordChangeSubmit = function(e) {
 
 /* Record Edit & Google Sheets Dynamic Sync Engine */
 window.openEditRecordModal = function(index) {
-    const record = state.allRecordsFlat[index];
-    if (!record) return;
+    let record = state.allRecordsFlat[index];
+    if (!record && state.allRecordsFlat.length > 0) {
+        record = state.allRecordsFlat[0];
+    }
+    if (!record) {
+        showToast('수정할 데이터를 찾을 수 없습니다.', 'warning');
+        return;
+    }
 
     document.getElementById('edit-record-index').value = index;
     document.getElementById('edit-record-product').value = record.productName || '';
@@ -2187,33 +2193,61 @@ window.openEditRecordModal = function(index) {
     if (modal) modal.classList.add('active');
 };
 
-window.handleEditRecordSubmit = function(e) {
-    e.preventDefault();
-    const index = parseInt(document.getElementById('edit-record-index').value, 10);
-    const record = state.allRecordsFlat[index];
-    if (!record) return;
+window.saveRecordEditDirect = function(e) {
+    if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
 
+    const prodName = document.getElementById('edit-record-product').value;
+    const monthName = document.getElementById('edit-record-month').value;
     const newDate = document.getElementById('edit-record-date').value.trim();
     const newAmount = parseInt(document.getElementById('edit-record-amount').value, 10) || 0;
     const newStatus = document.getElementById('edit-record-status').value;
     const newMemo = document.getElementById('edit-record-memo').value.trim();
 
-    // Update local state
-    record.date = newDate;
-    record.amount = newAmount;
-    record.amountFormatted = formatKRW(newAmount);
-    record.status = newStatus;
-    record.memo = newMemo;
+    // 1. Find or create record in state.allRecordsFlat
+    let record = state.allRecordsFlat.find(r => r.productName === prodName && r.month === monthName);
+    if (!record) {
+        record = {
+            productName: prodName,
+            month: monthName,
+            date: newDate,
+            amount: newAmount,
+            amountFormatted: formatKRW(newAmount),
+            status: newStatus,
+            memo: newMemo
+        };
+        state.allRecordsFlat.push(record);
+    } else {
+        record.date = newDate;
+        record.amount = newAmount;
+        record.amountFormatted = formatKRW(newAmount);
+        record.status = newStatus;
+        record.memo = newMemo;
+    }
 
-    // Save to localStorage
+    // 2. Also update corresponding product in state.products if found
+    const targetProd = state.products.find(p => p.name === prodName);
+    if (targetProd && targetProd.months) {
+        const targetM = targetProd.months.find(m => m.month === monthName);
+        if (targetM) {
+            targetM.date = newDate;
+            targetM.amount = newAmount;
+            targetM.status = newStatus;
+        }
+    }
+
+    // 3. Save to localStorage
     localStorage.setItem('juwon_records_edits', JSON.stringify(state.allRecordsFlat));
+    localStorage.setItem('juwon_products', JSON.stringify(state.products));
 
-    // Save to Firebase if available
+    // 4. Save to Firebase if available
     if (state.db) {
         try {
-            state.db.collection('records_edits').doc(`${record.productName}_${record.month}`).set({
-                productName: record.productName,
-                month: record.month,
+            state.db.collection('records_edits').doc(`${prodName}_${monthName}`).set({
+                productName: prodName,
+                month: monthName,
                 date: newDate,
                 amount: newAmount,
                 status: newStatus,
@@ -2223,35 +2257,39 @@ window.handleEditRecordSubmit = function(e) {
         } catch (err) { console.warn("Firebase edit save error:", err); }
     }
 
-    // Sync payload to Google Apps Script WebApp
+    // 5. Sync payload to Google Apps Script WebApp
     if (state.webappUrl) {
-        fetch(state.webappUrl, {
-            method: 'POST',
-            mode: 'no-cors',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                action: 'update_record',
-                record: {
-                    productName: record.productName,
-                    month: record.month,
-                    date: newDate,
-                    amount: newAmount,
-                    status: newStatus,
-                    memo: newMemo,
-                    updatedAt: new Date().toISOString()
-                }
-            })
-        }).catch(err => console.warn("Google Apps Script sync warning:", err));
+        try {
+            fetch(state.webappUrl, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'update_record',
+                    record: {
+                        productName: prodName,
+                        month: monthName,
+                        date: newDate,
+                        amount: newAmount,
+                        status: newStatus,
+                        memo: newMemo,
+                        updatedAt: new Date().toISOString()
+                    }
+                })
+            }).catch(err => console.warn("Google Apps Script sync warning:", err));
+        } catch (err) { console.warn("Google Apps fetch catch:", err); }
     }
 
-    // Re-render
-    renderLedgerTable();
-    renderOverviewCard();
-    renderKPICards();
+    // 6. Refresh UI and close modal
+    try { renderLedgerTable(); } catch(err){}
+    try { renderProductsGrid(); } catch(err){}
+    try { renderOverviewCard(); } catch(err){}
+    try { renderKPICards(); } catch(err){}
     closeAllModals();
 
-    showToast(`✅ [${record.productName} - ${record.month}] 내역 수정 및 구글 시트 동기화가 완료되었습니다!`, 'success');
+    showToast(`✅ [${prodName} - ${monthName}] 내역 수정 및 구글 시트 전송이 완료되었습니다!`, 'success');
 };
+window.handleEditRecordSubmit = window.saveRecordEditDirect;
 
 window.toggleQuickDepositStatus = function(index) {
     const record = state.allRecordsFlat[index];

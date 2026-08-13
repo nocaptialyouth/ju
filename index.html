@@ -1255,7 +1255,7 @@ function highlightDuplicates() {
                 <h3 style="color: #38bdf8; margin: 0; font-size: 1.15rem;"><i class="fa-solid fa-pen-to-square"></i> 입금 내역 데이터 수정 & 구글 시트 전송</h3>
                 <button class="btn-close" onclick="closeAllModals()"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <form onsubmit="handleEditRecordSubmit(event)" style="display: flex; flex-direction: column; gap: 1rem; padding-top: 0.75rem;">
+            <form id="edit-record-form" onsubmit="saveRecordEditDirect(event)" style="display: flex; flex-direction: column; gap: 1rem; padding-top: 0.75rem;">
                 <input type="hidden" id="edit-record-index">
                 
                 <div>
@@ -1300,7 +1300,7 @@ function highlightDuplicates() {
 
                 <div class="modal-actions" style="margin-top: 0.5rem;">
                     <button type="button" class="btn btn-outline" onclick="closeAllModals()">취소</button>
-                    <button type="submit" class="btn btn-teal" style="background: #0284c7; border-color: #0369a1; color: #fff; font-weight: 700;">
+                    <button type="button" class="btn btn-teal" onclick="saveRecordEditDirect(event)" style="background: #0284c7; border-color: #0369a1; color: #fff; font-weight: 700; cursor: pointer;">
                         <i class="fa-solid fa-check"></i> 수정사항 저장 & 구글 시트 전송
                     </button>
                 </div>
