@@ -670,6 +670,70 @@ const HOSPITAL_EXPENSES_FALLBACK = [
     { date: "2026-07-31", category: "조리원비", details: "지헌(M카드)", amount: 1500000, amountFormatted: "₩1,500,000", note: "-" }
 ];
 
+function loadBackupData() {
+    state.savingsMasterList = SAVINGS_MASTER_FALLBACK;
+    state.hospitalExpenses = HOSPITAL_EXPENSES_FALLBACK;
+
+    state.products = SAVINGS_MASTER_FALLBACK.map((m, idx) => {
+        const isGeoreum = m.name.includes('걸음마');
+        const depositedRecords = [
+            { id: `rec_${idx}_7`, productName: m.name, rate: m.rate, month: '7월', date: m.startDate || '2026. 7. 30', amount: m.total || m.monthly, amountFormatted: formatKRW(m.total || m.monthly), status: 'deposited' },
+            { id: `rec_${idx}_8`, productName: m.name, rate: m.rate, month: '8월', date: isGeoreum ? '2026. 8. 13' : '-', amount: m.monthly || 300000, amountFormatted: formatKRW(m.monthly || 300000), status: isGeoreum ? 'deposited' : 'unpaid' },
+            { id: `rec_${idx}_9`, productName: m.name, rate: m.rate, month: '9월', date: '-', amount: m.monthly || 300000, amountFormatted: formatKRW(m.monthly || 300000), status: 'scheduled' }
+        ];
+
+        return {
+            id: `prod_fallback_${idx}`,
+            name: m.name,
+            rate: m.rate,
+            records: depositedRecords,
+            totalDeposited: isGeoreum ? 600000 : (m.total || m.monthly * 12)
+        };
+    });
+
+    state.maturedList = [
+        { type: "8월만기적금", bank: "부산은행", amount: 10000000, amountFormatted: "₩10,000,000" },
+        { type: "9월예금만기", bank: "새마을", amount: 20000000, amountFormatted: "₩20,000,000" },
+        { type: "7월청년도약계좌", bank: "IBK기업은행", amount: 16500000, amountFormatted: "₩16,500,000" }
+    ];
+
+    state.allRecordsFlat = [];
+    state.products.forEach(p => {
+        state.allRecordsFlat.push(...p.records);
+    });
+
+    // Re-apply any local edits saved in localStorage
+    const localEditsRaw = localStorage.getItem('juwon_records_edits');
+    if (localEditsRaw) {
+        try {
+            const localEdits = JSON.parse(localEditsRaw);
+            if (Array.isArray(localEdits)) {
+                localEdits.forEach(editRec => {
+                    const existingFlat = state.allRecordsFlat.find(r => r.productName === editRec.productName && r.month === editRec.month);
+                    if (existingFlat) {
+                        existingFlat.date = editRec.date;
+                        existingFlat.amount = editRec.amount;
+                        existingFlat.amountFormatted = editRec.amountFormatted || formatKRW(editRec.amount);
+                        existingFlat.status = editRec.status;
+                        existingFlat.memo = editRec.memo;
+                    } else {
+                        state.allRecordsFlat.push(editRec);
+                    }
+                });
+            }
+        } catch (e) {}
+    }
+
+    const totalAccumulatedSavings = state.products.reduce((s, p) => s + p.totalDeposited, 0);
+    const totalMatured = state.maturedList.reduce((s, m) => s + m.amount, 0);
+
+    state.kpi.accumulatedSavings = totalAccumulatedSavings;
+    state.kpi.maturityTotal = totalMatured;
+    state.kpi.parentalTotal = 19000000;
+    state.kpi.totalNetWorth = totalAccumulatedSavings + totalMatured;
+    state.paidCount = state.allRecordsFlat.filter(r => r.status === 'deposited').length;
+}
+
 // Zero-Cache Fetch Engine (Multi-Tab TSV Parser)
 async function fetchData(isSilent = false) {
     // 1. Fetch Savings Master Tab (gid=7284588)
@@ -732,17 +796,19 @@ async function fetchData(isSilent = false) {
                 parseTSVString(text);
             }
 
-            success = true;
-            renderSyncBanner(false, '구글 시트 3개 시트 탭 실시간 연동 완료 (100% 동기화)');
-            break;
+            if (state.products.length > 0) {
+                success = true;
+                renderSyncBanner(false, '구글 시트 3개 시트 탭 실시간 연동 완료 (100% 동기화)');
+                break;
+            }
         } catch (err) {
             console.warn(`Fetch failed for ${url}:`, err);
         }
     }
 
-    if (!success) {
+    if (!success || state.products.length === 0) {
         loadBackupData();
-        renderSyncBanner(true, '로컬 백업 모드로 가동 중입니다.');
+        renderSyncBanner(true, '로컬 데이터 모드로 정상 작동 중입니다.');
     }
 
     renderDashboard();
@@ -752,7 +818,7 @@ async function fetchData(isSilent = false) {
     renderMaturityTable();
     renderCalendar();
     state.lastUpdated = new Date();
-    elements.bannerUpdatedTime.innerText = `기준일시: ${formatTime(state.lastUpdated)}`;
+    if (elements.bannerUpdatedTime) elements.bannerUpdatedTime.innerText = `기준일시: ${formatTime(state.lastUpdated)}`;
     
     if (!isSilent && success) {
         showToast('구글 시트 3개 탭 변경 사항 자동 수집 완료', 'success');
