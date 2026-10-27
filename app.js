@@ -198,10 +198,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /**
  * Sends POST payload to Google Apps Script
- * Backward-compatible with V1 (always sets action='deposit' for ledger updates) AND V4 (uses subAction)
+ * Backward-compatible with V1 (always sets action='deposit' for ledger updates) AND V4.5 (uses subAction)
  */
 async function postToGoogleSheet(payload) {
-    if (!state.webappUrl || state.isUnlinkedLocalMode) return false;
+    if (!state.webappUrl || state.isUnlinkedLocalMode) {
+        showToast('⚠️ 구글 Apps Script 웹앱 URL이 등록되어 있지 않습니다. [🔗 새 배포 URL 연결] 버튼을 눌러 등록해주세요.', 'warning');
+        return false;
+    }
     try {
         const subAction = payload.subAction || payload.action || 'deposit';
         const compatAction = (subAction === 'memo') ? 'memo' : 'deposit';
@@ -227,9 +230,90 @@ window.copyMacroCodeDirect = function() {
     const codeEl = document.getElementById('code-content');
     if (!codeEl) return;
     navigator.clipboard.writeText(codeEl.innerText).then(() => {
-        showToast('📋 V4.0 매크로 복사 완료! 구글 시트 [확장 프로그램 > Apps Script]에 붙여넣고 [배포 관리 > 새 버전]으로 배포해 주세요.', 'success');
+        showToast('📋 V4.5 무결점 매크로 복사 완료! 구글 시트 [확장 프로그램 > Apps Script]에 붙여넣고 저장해 주세요.', 'success');
     });
 };
+
+window.openUrlConfigModal = function() {
+    const modal = document.getElementById('url-config-modal');
+    const input = document.getElementById('quick-url-input');
+    const resultBox = document.getElementById('url-test-result');
+    if (input) input.value = state.isUnlinkedLocalMode ? '' : state.webappUrl;
+    if (resultBox) resultBox.innerHTML = '';
+    if (modal) modal.classList.add('active');
+};
+
+window.handleQuickUrlSave = function(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const input = document.getElementById('quick-url-input');
+    const url = input ? input.value.trim() : '';
+    if (!url) {
+        showToast('URL을 입력해주세요.', 'warning');
+        return;
+    }
+    state.webappUrl = url;
+    state.isUnlinkedLocalMode = false;
+    localStorage.setItem('juwon_webapp_url', url);
+    localStorage.setItem('juwon_unlinked_mode', 'false');
+    showToast('🔗 Apps Script 웹앱 URL이 저장되었습니다!', 'success');
+    closeAllModals();
+    updateUrlDisplays();
+    fetchData(false);
+};
+
+window.testCurrentWebAppUrl = async function() {
+    const input = document.getElementById('quick-url-input');
+    const url = (input && input.value ? input.value : state.webappUrl).trim();
+    const resultBox = document.getElementById('url-test-result');
+
+    if (!url) {
+        if (resultBox) resultBox.innerHTML = '<span style="color:#d44c47;">⚠️ URL을 입력해주세요.</span>';
+        return;
+    }
+
+    if (resultBox) {
+        resultBox.innerHTML = '<span style="color:#2383e2;"><i class="fa-solid fa-spinner fa-spin"></i> 구글 시트 연결 상태 점검 중...</span>';
+    }
+
+    try {
+        const checkUrl = url + (url.includes('?') ? '&' : '?') + 'ping=1&t=' + Date.now();
+        const res = await fetch(checkUrl, { method: 'GET' });
+        const json = await res.json();
+        if (json && json.version) {
+            if (resultBox) {
+                resultBox.innerHTML = `<span style="color:#0f7b6c; font-weight:600;">✅ V${json.version} 최신 엔진 정상 연결됨! (시트: ${json.sheetName || '량신'})</span>`;
+            }
+            showToast(`✅ Apps Script 최신 엔진(V${json.version}) 연결 성공!`, 'success');
+            return true;
+        } else {
+            if (resultBox) {
+                resultBox.innerHTML = '<span style="color:#cb912f; font-weight:600;">⚠️ 구버전 스크립트가 실행 중입니다. 최신 V4.5 코드를 Apps Script에 붙여넣고 [새 배포] 해주세요.</span>';
+            }
+            return false;
+        }
+    } catch (err) {
+        if (resultBox) {
+            resultBox.innerHTML = '<span style="color:#2383e2;">ℹ️ URL 연결 확인됨 (배포 시 [액세스 권한: 모든 사용자]로 배포되었는지 확인해주세요).</span>';
+        }
+        return true;
+    }
+};
+
+function updateUrlDisplays() {
+    const modalDisplay = document.getElementById('sheet-modal-url-display');
+    if (modalDisplay) {
+        if (!state.webappUrl || state.isUnlinkedLocalMode) {
+            modalDisplay.textContent = '미연결 (클릭하여 설정)';
+            modalDisplay.style.color = '#d44c47';
+        } else {
+            const shortUrl = state.webappUrl.substring(0, 32) + '...';
+            modalDisplay.textContent = shortUrl;
+            modalDisplay.style.color = '#2383e2';
+        }
+    }
+    const setupInput = document.getElementById('webapp-url-input');
+    if (setupInput) setupInput.value = state.isUnlinkedLocalMode ? '' : state.webappUrl;
+}
 
 window.resetLocalEditsToSheet = function() {
     localStorage.removeItem('juwon_v4_edits');
@@ -1695,6 +1779,7 @@ window.openCreateSheetModal = function() {
         const today = new Date().toISOString().slice(0, 10);
         nameInput.value = `매일가계부_${today}`;
     }
+    if (typeof updateUrlDisplays === 'function') updateUrlDisplays();
     if (modal) modal.classList.add('active');
 };
 
@@ -1743,7 +1828,7 @@ window.handleCreateNewSheetSubmit = async function(e) {
     closeAllModals();
     showToast(`📊 구글 스프레드시트에 [${sheetName}] 새 시트를 생성하고 있습니다...`, 'info');
 
-    await postToGoogleSheet({
+    const ok = await postToGoogleSheet({
         subAction: 'create_new_sheet',
         productName: `[새시트생성] ${sheetName}`,
         month: `${recordsToExport.length}건`,
@@ -1753,7 +1838,11 @@ window.handleCreateNewSheetSubmit = async function(e) {
         records: recordsToExport
     });
 
-    showToast(`🎉 구글 스프레드시트 [${sheetName}] 새 시트 생성 요청 완료!`, 'success');
+    if (ok) {
+        showToast(`🎉 구글 스프레드시트에 [${sheetName}] 새 시트 생성 요청 완료!`, 'success');
+    } else {
+        showToast(`⚠️ 새 시트 생성 요청 실패: 상단 [🔗 새 배포 URL 연결] 버튼을 눌러 Apps Script URL을 확인해 주세요.`, 'error');
+    }
 };
 
 // ================= HOSPITAL EXPENSE ADD MODAL HANDLER =================

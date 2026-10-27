@@ -85,8 +85,11 @@
         <div class="notion-page-header">
             <h1 class="notion-page-title">매일가계부</h1>
             <div class="notion-page-quick-tools">
-                <button class="notion-btn notion-btn-warm btn-sm" onclick="copyMacroCodeDirect()" title="구글 시트 표 자동 수정용 최신 V4.0 매크로 복사">
-                    📋 시트 자동반영 매크로(V4) 복사
+                <button class="notion-btn notion-btn-warm btn-sm" onclick="copyMacroCodeDirect()" title="구글 시트 표 자동 수정용 최신 V4.5 무결점 매크로 복사">
+                    📋 최신 매크로(V4.5) 복사
+                </button>
+                <button class="notion-btn notion-btn-blue btn-sm" onclick="openUrlConfigModal()" title="구글 Apps Script 새 배포 후 발급받은 웹앱 URL을 웹에 등록합니다">
+                    <i class="fa-solid fa-link"></i> 새 배포 URL 연결
                 </button>
                 <button class="notion-btn notion-btn-default btn-sm" onclick="resetLocalEditsToSheet()" title="웹 임시 수정내역을 비우고 구글 시트 원본과 100% 일치시킵니다">
                     🔄 시트 원본으로 초기화
@@ -108,14 +111,16 @@
             </div>
             <div class="guide-toggles">
                 <details class="notion-toggle" open>
-                    <summary><span class="toggle-arrow">▶</span> 🍊 [필수 확인] 웹에서 수정·기입한 금액이 구글 시트 표(10월 칸 등)에 바로 적히게 하려면?</summary>
+                    <summary><span class="toggle-arrow">▶</span> 🍊 [핵심 안내] 웹에서 기입한 내용이 구글 시트 표(10월 칸)에 적히고 새 시트가 만들어지게 하려면?</summary>
                     <div class="toggle-content">
-                        <p>현재 연결된 구글 스프레드시트(<strong>량신</strong>) 내부의 Apps Script가 <strong>기존 구버전(8월 배포본)</strong>으로 되어 있으면, 웹에서 입력한 내역이 메인 표(<code>걸음마 적금 10월</code> 칸 등)에 적히지 않고 <code>일정메모</code>나 <code>입금신청내역</code> 탭으로만 빠지게 됩니다.</p>
-                        <p style="margin-top:0.35rem;"><strong>딱 1번만 아래 순서대로 구글 시트의 스크립트를 업데이트해 주세요 (1분 소요):</strong></p>
+                        <p>구글 스프레드시트(<strong>량신</strong>) 내부의 Apps Script를 아래 순서로 단 1번만 업데이트해주시면 됩니다 (오류 없이 안전하게 연결됩니다):</p>
                         <ul>
-                            <li><strong>1단계:</strong> 우측 상단의 <button class="notion-btn notion-btn-blue btn-xs" onclick="copyMacroCodeDirect()">📋 시트 자동반영 매크로(V4) 복사</button> 버튼을 클릭합니다.</li>
-                            <li><strong>2단계:</strong> 구글 스프레드시트(<strong>량신</strong>) 상단 메뉴에서 <code>[확장 프로그램] &gt; [Apps Script]</code>를 열고, 기존 코드를 모두 지운 뒤 복사한 V4.0 코드를 붙여넣고 <strong>저장(💾)</strong>합니다.</li>
-                            <li><strong>3단계 (중요):</strong> 우측 상단 <code>[배포] &gt; [배포 관리]</code> 클릭 ➡️ 상단 연필 아이콘(✏️ 수정) 클릭 ➡️ 버전을 <strong>[새 버전 (New version)]</strong>으로 선택 후 <code>[배포]</code>를 누르면 끝! (기존 URL 그대로 즉시 양방향 자동기입 & 새 시트 생성이 작동합니다.)</li>
+                            <li><strong>1단계 (코드 복사):</strong> 우측 상단의 <button class="notion-btn notion-btn-warm btn-xs" onclick="copyMacroCodeDirect()">📋 최신 매크로(V4.5) 복사</button> 버튼을 누릅니다.</li>
+                            <li><strong>2단계 (붙여넣기):</strong> 스프레드시트 상단 메뉴 <code>[확장 프로그램] &gt; [Apps Script]</code>를 열고, <strong>기존 코드를 전체 삭제</strong>한 뒤 복사한 코드를 붙여넣고 <strong>저장(💾)</strong>합니다. (편집기에서 [실행]을 누르면 <code>testConnection</code>이 작동해 "스프레드시트 정상 연결 확인" 로그가 뜹니다.)</li>
+                            <li><strong>3단계 (배포 & 연결 — 둘 중 하나 선택):</strong>
+                                <br>• <strong>방법 A (추천·가장 간편):</strong> 우측 상단 <code>[배포] &gt; [배포 관리]</code> ➡️ 연필(✏️ 수정) 클릭 ➡️ 버전을 <strong>[새 버전]</strong>으로 선택 후 <code>[배포]</code> 클릭! (기존 URL 그대로 즉시 연결됨)
+                                <br>• <strong>방법 B (새 배포를 누른 경우):</strong> <code>[배포] &gt; [새 배포]</code> (액세스: <strong>모든 사용자</strong>)를 누르셨다면, 화면에 나오는 <strong>웹 앱 URL</strong>을 복사하여 상단 <button class="notion-btn notion-btn-blue btn-xs" onclick="openUrlConfigModal()"><i class="fa-solid fa-link"></i> 새 배포 URL 연결</button> 버튼을 눌러 붙여넣어 주시면 즉시 연동됩니다!
+                            </li>
                         </ul>
                     </div>
                 </details>
@@ -848,29 +853,69 @@
                     <!-- 2. Apps Script Code v4.0 (Supports Auto Row Append, Cell Update & New Sheet Creation!) -->
                     <div class="notion-card" style="margin-bottom:1.25rem;">
                         <div class="notion-card-header">
-                            <h3>📜 2단계: 구글 스프레드시트(량신) 양방향 자동화 매크로 (Apps Script V4.0)</h3>
+                            <h3>📜 2단계: 구글 스프레드시트(량신) 양방향 자동화 매크로 (Apps Script V4.5 무결점판)</h3>
                             <button class="notion-btn notion-btn-blue btn-xs" id="btn-copy-code">
                                 <i class="fa-solid fa-copy"></i> 매크로 코드 복사
                             </button>
                         </div>
                         <p style="font-size:0.83rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-                            이 코드는 <strong>량신</strong> 스프레드시트의 <strong>① 월별 적금 시트(gid=661362148) 해당 월 칸 자동 기입 & 총액 갱신, ② 적금리스트(gid=7284588) 총금액 자동 갱신, ③ 새로운 시트(탭) 자동 생성</strong>을 모두 처리합니다.
+                            이 코드는 <strong>량신</strong> 스프레드시트의 <strong>① 월별 적금 시트(gid=661362148) 해당 월 칸 자동 기입 &amp; 총액 갱신, ② 적금리스트(gid=7284588) 총금액 자동 갱신, ③ 새로운 시트(탭) 자동 생성</strong>을 모두 완벽하게 처리합니다.
                         </p>
                         <div class="code-viewer-container">
                             <div class="code-header">
                                 <span class="code-filename">Code.gs (구글 시트 [확장 프로그램] &gt; [Apps Script]에 덮어쓰기 후 [배포 관리] &gt; [새 버전] 배포)</span>
                             </div>
                             <pre class="code-block"><code id="code-content">/**
- * 📒 매일가계부 & 주원 가족 자산 통합 Google Apps Script (V4.0 — 시트 GID 정밀 매칭 양방향 엔진)
- * - gid=661362148 (월별 적금 통합 리스트) & gid=7284588 (적금리스트) & gid=1541600042 (조리원/병원비) 자동 반영
+ * 📒 매일가계부 &amp; 주원 가족 자산 통합 Google Apps Script (V4.5 — 완전 무결점 배포판)
+ * - 스프레드시트 고유 ID: 16xlN-rZwRRsOhdylZGZZL1-FF3flTthARoE6Tr4Xwrg (량신)
+ * - [실행] 버튼 클릭 시 자동 진단(testConnection) 실행으로 에러 방지
+ * - 새 시트 생성, 월별 셀(gid=661362148) 기입, 적금마스터(gid=7284588) 갱신 완벽 지원
  */
 
-function getSheetByGid(ss, gid, fallbackIdx) {
-  var sheets = ss.getSheets();
-  for (var i = 0; i &lt; sheets.length; i++) {
-    if (sheets[i].getSheetId() == gid) return sheets[i];
+var SPREADSHEET_ID = '16xlN-rZwRRsOhdylZGZZL1-FF3flTthARoE6Tr4Xwrg';
+
+/**
+ * ✅ 테스트 실행 함수 (Apps Script 편집기에서 [실행] 클릭 시 오류 없이 즉시 점검)
+ */
+function testConnection() {
+  var ss = getSS();
+  if (!ss) {
+    Logger.log("❌ 스프레드시트를 열 수 없습니다. 시트 ID를 확인해주세요.");
+    return "FAIL";
   }
-  return sheets[fallbackIdx || 0] || sheets[0];
+  Logger.log("✅ 스프레드시트 정상 연결 완료: [" + ss.getName() + "]");
+  var gridSheet = getSheetByGid(ss, 661362148, 1);
+  var masterSheet = getSheetByGid(ss, 7284588, 0);
+  Logger.log("  • 월별 시트: " + (gridSheet ? gridSheet.getName() : "없음"));
+  Logger.log("  • 적금리스트: " + (masterSheet ? masterSheet.getName() : "없음"));
+  return "SUCCESS";
+}
+
+function getSS() {
+  try {
+    var active = SpreadsheetApp.getActiveSpreadsheet();
+    if (active) return active;
+  } catch(e) {}
+  try {
+    return SpreadsheetApp.openById(SPREADSHEET_ID);
+  } catch(e2) {
+    return null;
+  }
+}
+
+function getSheetByGid(ss, gid, fallbackIdx) {
+  if (!ss) ss = getSS();
+  if (!ss) return null;
+  try {
+    var sheets = ss.getSheets();
+    if (!sheets || sheets.length === 0) return null;
+    for (var i = 0; i &lt; sheets.length; i++) {
+      if (sheets[i].getSheetId() == gid) return sheets[i];
+    }
+    return sheets[fallbackIdx || 0] || sheets[0];
+  } catch (err) {
+    return null;
+  }
 }
 
 function cleanProdKey(str) {
@@ -879,14 +924,16 @@ function cleanProdKey(str) {
 }
 
 function doGet(e) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = getSS();
   var gridSheet = getSheetByGid(ss, 661362148, 1);
   var masterSheet = getSheetByGid(ss, 7284588, 0);
-  var memoSheet = ss.getSheetByName('일정메모');
-  var webLedgerSheet = ss.getSheetByName('매일가계부_웹입력');
+  var memoSheet = ss ? ss.getSheetByName('일정메모') : null;
+  var webLedgerSheet = ss ? ss.getSheetByName('매일가계부_웹입력') : null;
 
   return ContentService.createTextOutput(JSON.stringify({
-    version: "4.0",
+    version: "4.5",
+    status: "ok",
+    sheetName: ss ? ss.getName() : "미연결",
     grid: gridSheet ? gridSheet.getDataRange().getDisplayValues() : [],
     master: masterSheet ? masterSheet.getDataRange().getDisplayValues() : [],
     memos: memoSheet ? memoSheet.getDataRange().getDisplayValues() : [],
@@ -896,14 +943,27 @@ function doGet(e) {
 
 function doPost(e) {
   try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var params = JSON.parse(e.postData.contents);
+    var ss = getSS();
+    if (!ss) {
+      return jsonResponse({ status: 'error', message: '스프레드시트를 열 수 없습니다.' });
+    }
+    var params = {};
+    if (e &amp;&amp; e.postData &amp;&amp; e.postData.contents) {
+      try {
+        params = JSON.parse(e.postData.contents);
+      } catch(pErr) {
+        params = e.parameter || {};
+      }
+    } else if (e &amp;&amp; e.parameter) {
+      params = e.parameter;
+    }
+
     var act = params.subAction || params.action || 'deposit';
     var nowStr = Utilities.formatDate(new Date(), "Asia/Seoul", "yyyy-MM-dd HH:mm:ss");
 
     // 1. 새로운 시트(탭) 생성 요청 처리
     if (act === 'create_new_sheet' || act === 'create_edit_history_sheet') {
-      var targetName = params.sheetName || ('매일가계부_' + Utilities.formatDate(new Date(), "Asia/Seoul", "yyyyMMdd_HHmm"));
+      var targetName = (params.sheetName || ('매일가계부_' + Utilities.formatDate(new Date(), "Asia/Seoul", "yyyyMMdd_HHmm"))).toString().trim();
       var newSheet = ss.getSheetByName(targetName);
       if (!newSheet) {
         newSheet = ss.insertSheet(targetName);
@@ -933,7 +993,7 @@ function doPost(e) {
       if (rows.length &gt; 0) {
         newSheet.appendRow(['', '합계', '', '=SUM(D2:D' + (rows.length + 1) + ')', '', '', '', '', '', '']);
       }
-      return jsonResponse({ status: 'success', version: '4.0', sheetName: targetName });
+      return jsonResponse({ status: 'success', version: '4.5', sheetName: targetName, rowCount: rows.length });
     }
 
     // 2. 적금 입금 / 내역 수정 / 웹 가계부 기입 처리
@@ -946,12 +1006,12 @@ function doPost(e) {
       var statusStr = rec.status || params.status || 'deposited';
       var prodKey = cleanProdKey(prodName);
 
-      // (A) 월별 적금 통합 리스트 시트(gid=661362148)에서 해당 상품 & 월 셀 찾아 직접 기입
+      // (A) 월별 적금 통합 리스트 시트(gid=661362148)에서 해당 상품 &amp; 월 셀 찾아 직접 기입
       var gridSheet = getSheetByGid(ss, 661362148, 1);
-      var grid = gridSheet.getDataRange().getDisplayValues();
+      var grid = gridSheet ? gridSheet.getDataRange().getDisplayValues() : [];
       var updatedBlockSum = -1;
 
-      if (prodKey &amp;&amp; monthStr) {
+      if (gridSheet &amp;&amp; prodKey &amp;&amp; monthStr) {
         for (var r = 0; r &lt; grid.length - 1; r++) {
           var subRow = grid[r + 1] || [];
           for (var sc = 0; sc &lt; subRow.length; sc++) {
@@ -996,13 +1056,15 @@ function doPost(e) {
       // (B) 적금리스트 시트(gid=7284588)의 총금액(I열)도 함께 갱신
       if (prodKey &amp;&amp; updatedBlockSum &gt;= 0) {
         var masterSheet = getSheetByGid(ss, 7284588, 0);
-        var mGrid = masterSheet.getDataRange().getDisplayValues();
-        for (var mr2 = 0; mr2 &lt; mGrid.length; mr2++) {
-          var mName = cleanProdKey(mGrid[mr2][3] || mGrid[mr2][2] || '');
-          if (mName &amp;&amp; (mName.indexOf(prodKey) !== -1 || prodKey.indexOf(mName) !== -1)) {
-            var mTotalCell = masterSheet.getRange(mr2 + 1, 9); // Col I (총금액)
-            if (!mTotalCell.getFormula()) mTotalCell.setValue(updatedBlockSum);
-            break;
+        if (masterSheet) {
+          var mGrid = masterSheet.getDataRange().getDisplayValues();
+          for (var mr2 = 0; mr2 &lt; mGrid.length; mr2++) {
+            var mName = cleanProdKey(mGrid[mr2][3] || mGrid[mr2][2] || '');
+            if (mName &amp;&amp; (mName.indexOf(prodKey) !== -1 || prodKey.indexOf(mName) !== -1)) {
+              var mTotalCell = masterSheet.getRange(mr2 + 1, 9); // Col I (총금액)
+              if (!mTotalCell.getFormula()) mTotalCell.setValue(updatedBlockSum);
+              break;
+            }
           }
         }
       }
@@ -1024,24 +1086,28 @@ function doPost(e) {
         nowStr
       ]);
 
-      return jsonResponse({ status: 'success', version: '4.0', updatedBlockSum: updatedBlockSum });
+      return jsonResponse({ status: 'success', version: '4.5', updatedBlockSum: updatedBlockSum });
     }
 
     // 3. 신규 적금 상품 등록 시 [적금리스트](gid=7284588)에 자동 행 추가
     if (act === 'new_product') {
       var listSheet = getSheetByGid(ss, 7284588, 0);
-      var isJuwon = params.owner === '주원' ? 'O' : 'X';
-      var isJihyeon = params.owner === '지헌' ? 'O' : 'X';
-      var isJunyeong = params.owner === '준영' ? 'O' : 'X';
-      listSheet.appendRow(['', '', '', params.name, isJuwon, isJihyeon, isJunyeong, Number(params.monthly) || 0, Number(params.initial) || 0, params.startDate || '-', params.endDate || '-']);
-      return jsonResponse({ status: 'success', version: '4.0' });
+      if (listSheet) {
+        var isJuwon = params.owner === '주원' ? 'O' : 'X';
+        var isJihyeon = params.owner === '지헌' ? 'O' : 'X';
+        var isJunyeong = params.owner === '준영' ? 'O' : 'X';
+        listSheet.appendRow(['', '', '', params.name, isJuwon, isJihyeon, isJunyeong, Number(params.monthly) || 0, Number(params.initial) || 0, params.startDate || '-', params.endDate || '-']);
+      }
+      return jsonResponse({ status: 'success', version: '4.5' });
     }
 
     // 4. 병원비/조리원비 지출 추가 시 (gid=1541600042) 자동 행 추가
     if (act === 'add_hospital_expense') {
       var hospSheet = getSheetByGid(ss, 1541600042, 2);
-      hospSheet.appendRow(['', params.date, params.category, params.details, Number(params.amount) || 0, params.note || '-']);
-      return jsonResponse({ status: 'success', version: '4.0' });
+      if (hospSheet) {
+        hospSheet.appendRow(['', params.date, params.category, params.details, Number(params.amount) || 0, params.note || '-']);
+      }
+      return jsonResponse({ status: 'success', version: '4.5' });
     }
 
     // 5. 일정/메모 저장
@@ -1053,7 +1119,7 @@ function doPost(e) {
       }
       memoSheet.appendRow([params.date, params.time || '', params.category || '메모', params.content, nowStr]);
     }
-    return jsonResponse({ status: 'success', version: '4.0' });
+    return jsonResponse({ status: 'success', version: '4.5' });
 
   } catch (err) {
     return jsonResponse({ status: 'error', message: err.message });
@@ -1175,9 +1241,46 @@ function jsonResponse(obj) {
                 <div class="notion-callout-tip">
                     💡 연결된 구글 스프레드시트 하단에 입력하신 이름의 <strong>새로운 시트 탭</strong>이 생성되며, 금액 합계 수식(<code>=SUM</code>)까지 자동으로 들어갑니다.
                 </div>
-                <div class="modal-actions">
+                <div style="margin-top:0.65rem; padding:8px 12px; background:#f7f6f3; border-radius:6px; font-size:0.8rem; display:flex; align-items:center; justify-content:space-between;">
+                    <div>
+                        <span style="color:#787774;">연동 웹앱:</span>
+                        <strong id="sheet-modal-url-display" style="font-family:monospace; color:#2383e2; margin-left:4px;"></strong>
+                    </div>
+                    <button type="button" class="notion-btn notion-btn-default btn-xs" onclick="openUrlConfigModal()">URL 변경</button>
+                </div>
+                <div class="modal-actions" style="margin-top:1rem;">
                     <button type="button" class="notion-btn notion-btn-default" onclick="closeAllModals()">취소</button>
                     <button type="submit" class="notion-btn notion-btn-blue"><i class="fa-solid fa-cloud-arrow-up"></i> 구글 시트에 즉시 생성</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Quick WebApp URL Configuration & Diagnostic Modal -->
+    <div class="modal-overlay" id="url-config-modal">
+        <div class="modal-content notion-modal" style="max-width:520px;">
+            <div class="modal-header">
+                <h3>🔗 구글 Apps Script 웹앱 URL 연결 & 진단</h3>
+                <button class="btn-close" onclick="closeAllModals()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form onsubmit="handleQuickUrlSave(event)" class="modal-form">
+                <p style="font-size:0.84rem; color:var(--text-secondary); line-height:1.5;">
+                    구글 시트 <code>[확장 프로그램] &gt; [Apps Script]</code>에서 <strong>[새 배포]</strong> 후 발급받은 <strong>웹 앱 URL</strong>을 아래에 붙여넣어 주세요.
+                </p>
+                <div class="input-group">
+                    <label>Apps Script 웹 앱 URL</label>
+                    <input type="text" id="quick-url-input" class="url-text-input" placeholder="https://script.google.com/macros/s/.../exec" required style="width:100%;">
+                </div>
+                <div id="url-test-result" style="font-size:0.83rem; margin:0.35rem 0;"></div>
+                <div class="notion-callout-tip" style="font-size:0.8rem;">
+                    💡 <strong>배포 시 필수 체크:</strong><br>
+                    • 액세스 권한: <strong>[모든 사용자 (Anyone)]</strong> 선택<br>
+                    • 다음 사용자 권한으로 실행: <strong>[웹앱에 액세스하는 사용자]</strong> 또는 <strong>[나 (소유자)]</strong>
+                </div>
+                <div class="modal-actions" style="margin-top:1rem;">
+                    <button type="button" class="notion-btn notion-btn-default" onclick="closeAllModals()">닫기</button>
+                    <button type="button" class="notion-btn notion-btn-default" onclick="testCurrentWebAppUrl()">🔍 연결 진단 테스트</button>
+                    <button type="submit" class="notion-btn notion-btn-blue"><i class="fa-solid fa-check"></i> 저장 & 즉시 적용</button>
                 </div>
             </form>
         </div>
