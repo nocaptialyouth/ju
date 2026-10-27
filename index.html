@@ -85,6 +85,12 @@
         <div class="notion-page-header">
             <h1 class="notion-page-title">매일가계부</h1>
             <div class="notion-page-quick-tools">
+                <button class="notion-btn notion-btn-warm btn-sm" onclick="copyMacroCodeDirect()" title="구글 시트 표 자동 수정용 최신 V4.0 매크로 복사">
+                    📋 시트 자동반영 매크로(V4) 복사
+                </button>
+                <button class="notion-btn notion-btn-default btn-sm" onclick="resetLocalEditsToSheet()" title="웹 임시 수정내역을 비우고 구글 시트 원본과 100% 일치시킵니다">
+                    🔄 시트 원본으로 초기화
+                </button>
                 <button class="notion-btn notion-btn-default btn-sm" onclick="openKakaoModal()">
                     💬 카톡 알림문구
                 </button>
@@ -98,17 +104,18 @@
         <section class="notion-callout-guide">
             <div class="guide-header">
                 <span class="guide-icon">🥞</span>
-                <span class="guide-title">가이드</span>
+                <span class="guide-title">가이드 & 구글 스프레드시트 실시간 동기화 안내</span>
             </div>
             <div class="guide-toggles">
-                <details class="notion-toggle">
-                    <summary><span class="toggle-arrow">▶</span> 🍊 매일가계부 작성방법 (웹에서 추가하면 구글 시트에도 자동 반영되나요?)</summary>
+                <details class="notion-toggle" open>
+                    <summary><span class="toggle-arrow">▶</span> 🍊 [필수 확인] 웹에서 수정·기입한 금액이 구글 시트 표(10월 칸 등)에 바로 적히게 하려면?</summary>
                     <div class="toggle-content">
-                        <p>네! 아래 <strong>✽ 가계부</strong> 표 하단의 <code>+ 새 내역 바로 추가</code> 입력줄이나 왼쪽 메뉴의 <code>새로 만들기</code> 버튼을 통해 금액과 내역을 기입하시면 <strong>구글 스프레드시트와 클라우드(Firebase)에 즉시 자동 전송</strong>됩니다.</p>
+                        <p>현재 연결된 구글 스프레드시트(<strong>량신</strong>) 내부의 Apps Script가 <strong>기존 구버전(8월 배포본)</strong>으로 되어 있으면, 웹에서 입력한 내역이 메인 표(<code>걸음마 적금 10월</code> 칸 등)에 적히지 않고 <code>일정메모</code>나 <code>입금신청내역</code> 탭으로만 빠지게 됩니다.</p>
+                        <p style="margin-top:0.35rem;"><strong>딱 1번만 아래 순서대로 구글 시트의 스크립트를 업데이트해 주세요 (1분 소요):</strong></p>
                         <ul>
-                            <li><strong>기존 적금 입금 기입 시:</strong> 구글 시트의 해당 상품/월 칸에 입금일자와 금액이 자동으로 채워지며 합계가 갱신됩니다.</li>
-                            <li><strong>신규 적금 상품 / 지출 기입 시:</strong> 구글 시트 <code>[적금리스트]</code>, <code>[조리원/병원비]</code> 또는 <code>[웹_실시간입력내역]</code> 시트에 자동으로 행이 추가됩니다.</li>
-                            <li><strong>구글 시트 양방향 연동 설정:</strong> 처음 1회 <strong>[⚙️ 구글시트 연동설정]</strong> 메뉴에서 최신 V3 매크로 코드를 Apps Script에 붙여넣고 배포해주시면 새 시트 생성까지 100% 자동화됩니다.</li>
+                            <li><strong>1단계:</strong> 우측 상단의 <button class="notion-btn notion-btn-blue btn-xs" onclick="copyMacroCodeDirect()">📋 시트 자동반영 매크로(V4) 복사</button> 버튼을 클릭합니다.</li>
+                            <li><strong>2단계:</strong> 구글 스프레드시트(<strong>량신</strong>) 상단 메뉴에서 <code>[확장 프로그램] &gt; [Apps Script]</code>를 열고, 기존 코드를 모두 지운 뒤 복사한 V4.0 코드를 붙여넣고 <strong>저장(💾)</strong>합니다.</li>
+                            <li><strong>3단계 (중요):</strong> 우측 상단 <code>[배포] &gt; [배포 관리]</code> 클릭 ➡️ 상단 연필 아이콘(✏️ 수정) 클릭 ➡️ 버전을 <strong>[새 버전 (New version)]</strong>으로 선택 후 <code>[배포]</code>를 누르면 끝! (기존 URL 그대로 즉시 양방향 자동기입 & 새 시트 생성이 작동합니다.)</li>
                         </ul>
                     </div>
                 </details>
@@ -249,21 +256,21 @@
                         <div class="notion-kpi-card">
                             <div class="kpi-top">
                                 <span class="kpi-emoji">💰</span>
-                                <span class="notion-tag tag-green">실시간 자동집계</span>
+                                <span class="notion-tag tag-green">시트 실시간 동기화</span>
                             </div>
-                            <div class="kpi-label">전체 통합 자산 (적금+만기)</div>
-                            <div class="kpi-value" id="kpi-total-networth">₩0</div>
-                            <div class="kpi-sub">구글 시트 + 웹 추가분 합산</div>
+                            <div class="kpi-label">전체 통합 자산 (저축+만기)</div>
+                            <div class="kpi-value" id="kpi-total-networth">₩50,800,000</div>
+                            <div class="kpi-sub" id="kpi-sub-networth">특판예금(2,300만)·기쁨두배(140만)·카뱅(20만) 포함 총 ₩75,400,000</div>
                         </div>
 
                         <div class="notion-kpi-card">
                             <div class="kpi-top">
                                 <span class="kpi-emoji">🐷</span>
-                                <span class="notion-tag tag-purple" id="stat-product-count">9개 상품</span>
+                                <span class="notion-tag tag-purple" id="stat-product-count">8개 적금상품</span>
                             </div>
-                            <div class="kpi-label">현재 총 누적 저축액</div>
-                            <div class="kpi-value" id="kpi-accumulated-savings">₩0</div>
-                            <div class="kpi-sub">납입완료: <strong id="stat-paid-count">0회</strong> (<span id="overall-completion-rate">0%</span>)</div>
+                            <div class="kpi-label">총 누적 저축액 (시트 C3 기준)</div>
+                            <div class="kpi-value" id="kpi-accumulated-savings">₩4,300,000</div>
+                            <div class="kpi-sub" id="kpi-sub-savings">납입완료: <strong id="stat-paid-count">0회</strong> (<span id="overall-completion-rate">0%</span>)</div>
                             <div class="mini-progress-track">
                                 <div class="mini-progress-fill" id="overall-progress-bar" style="width:0%;"></div>
                             </div>
@@ -274,19 +281,19 @@
                                 <span class="kpi-emoji">🏦</span>
                                 <span class="notion-tag tag-blue">확정 예금자산</span>
                             </div>
-                            <div class="kpi-label">만기 및 예금 보유액</div>
-                            <div class="kpi-value" id="kpi-maturity-total">₩0</div>
-                            <div class="kpi-sub">부산은행 · 새마을 · 청년도약</div>
+                            <div class="kpi-label">만기적금총액 (시트 D3 기준)</div>
+                            <div class="kpi-value" id="kpi-maturity-total">₩46,500,000</div>
+                            <div class="kpi-sub" id="kpi-sub-maturity">부산 1,000만 · 새마을 2,000만 · 도약 1,650만 (+특판예금 2,300만)</div>
                         </div>
 
                         <div class="notion-kpi-card">
                             <div class="kpi-top">
                                 <span class="kpi-emoji">👶</span>
-                                <span class="notion-tag tag-yellow">매월 25일 입금</span>
+                                <span class="notion-tag tag-yellow">아이급여 ₩200,000</span>
                             </div>
-                            <div class="kpi-label">부모급여 총 수령 예정액</div>
-                            <div class="kpi-value" id="kpi-parental-total">₩0</div>
-                            <div class="kpi-sub">0세 월 100만 / 1세 월 50만</div>
+                            <div class="kpi-label">부모급여 총액 (시트 E3·F3 기준)</div>
+                            <div class="kpi-value" id="kpi-parental-total">₩19,000,000</div>
+                            <div class="kpi-sub" id="kpi-sub-parental">아이급여 누적 ₩200,000 · 부모급여 수령완료 ₩2,000,000</div>
                         </div>
                     </div>
 
@@ -838,50 +845,52 @@
                         </div>
                     </div>
 
-                    <!-- 2. Apps Script Code v3.0 (Supports Auto Row Append, Cell Update & New Sheet Creation!) -->
+                    <!-- 2. Apps Script Code v4.0 (Supports Auto Row Append, Cell Update & New Sheet Creation!) -->
                     <div class="notion-card" style="margin-bottom:1.25rem;">
                         <div class="notion-card-header">
-                            <h3>📜 2단계: 구글 스프레드시트 양방향 자동화 매크로 (Apps Script V3.0)</h3>
+                            <h3>📜 2단계: 구글 스프레드시트(량신) 양방향 자동화 매크로 (Apps Script V4.0)</h3>
                             <button class="notion-btn notion-btn-blue btn-xs" id="btn-copy-code">
                                 <i class="fa-solid fa-copy"></i> 매크로 코드 복사
                             </button>
                         </div>
                         <p style="font-size:0.83rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-                            이 코드는 웹에서 내역 기입 시 <strong>① 기존 적금 시트 금액 자동 반영, ② 매일가계부 통합장부 시트 자동 추가, ③ 새로운 시트(탭) 자동 생성</strong>을 모두 지원합니다.
+                            이 코드는 <strong>량신</strong> 스프레드시트의 <strong>① 월별 적금 시트(gid=661362148) 해당 월 칸 자동 기입 & 총액 갱신, ② 적금리스트(gid=7284588) 총금액 자동 갱신, ③ 새로운 시트(탭) 자동 생성</strong>을 모두 처리합니다.
                         </p>
                         <div class="code-viewer-container">
                             <div class="code-header">
-                                <span class="code-filename">Code.gs (구글 시트 Apps Script 편집기에 덮어쓰기)</span>
+                                <span class="code-filename">Code.gs (구글 시트 [확장 프로그램] &gt; [Apps Script]에 덮어쓰기 후 [배포 관리] &gt; [새 버전] 배포)</span>
                             </div>
                             <pre class="code-block"><code id="code-content">/**
- * 📒 매일가계부 & 주원 가족 자산 통합 Google Apps Script (V3.0 양방향 자동 반영 엔진)
- * - 웹 대시보드에서 내역 추가/수정 시 스프레드시트 금액 자동 기입 및 새 시트 자동 생성 지원
+ * 📒 매일가계부 & 주원 가족 자산 통합 Google Apps Script (V4.0 — 시트 GID 정밀 매칭 양방향 엔진)
+ * - gid=661362148 (월별 적금 통합 리스트) & gid=7284588 (적금리스트) & gid=1541600042 (조리원/병원비) 자동 반영
  */
 
-function onOpen(e) {
-  try {
-    var ui = SpreadsheetApp.getUi();
-    ui.createMenu('📒 매일가계부 관리')
-      .addItem('⚡ 자산합계 새로고침', 'fillAllAccounts')
-      .addToUi();
-  } catch (err) {}
+function getSheetByGid(ss, gid, fallbackIdx) {
+  var sheets = ss.getSheets();
+  for (var i = 0; i &lt; sheets.length; i++) {
+    if (sheets[i].getSheetId() == gid) return sheets[i];
+  }
+  return sheets[fallbackIdx || 0] || sheets[0];
+}
+
+function cleanProdKey(str) {
+  if (!str) return '';
+  return str.toString().split('(')[0].replace(/\s+/g, '').trim();
 }
 
 function doGet(e) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheets()[0];
-  var data = sheet.getDataRange().getDisplayValues();
-  
+  var gridSheet = getSheetByGid(ss, 661362148, 1);
+  var masterSheet = getSheetByGid(ss, 7284588, 0);
   var memoSheet = ss.getSheetByName('일정메모');
-  var memoData = memoSheet ? memoSheet.getDataRange().getDisplayValues() : [];
-
   var webLedgerSheet = ss.getSheetByName('매일가계부_웹입력');
-  var webLedgerData = webLedgerSheet ? webLedgerSheet.getDataRange().getDisplayValues() : [];
 
   return ContentService.createTextOutput(JSON.stringify({
-    grid: data,
-    memos: memoData,
-    webLedger: webLedgerData
+    version: "4.0",
+    grid: gridSheet ? gridSheet.getDataRange().getDisplayValues() : [],
+    master: masterSheet ? masterSheet.getDataRange().getDisplayValues() : [],
+    memos: memoSheet ? memoSheet.getDataRange().getDisplayValues() : [],
+    webLedger: webLedgerSheet ? webLedgerSheet.getDataRange().getDisplayValues() : []
   })).setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -889,23 +898,24 @@ function doPost(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var params = JSON.parse(e.postData.contents);
+    var act = params.subAction || params.action || 'deposit';
     var nowStr = Utilities.formatDate(new Date(), "Asia/Seoul", "yyyy-MM-dd HH:mm:ss");
 
     // 1. 새로운 시트(탭) 생성 요청 처리
-    if (params.action === 'create_new_sheet' || params.action === 'create_edit_history_sheet') {
-      var targetName = params.sheetName || ('가계부시트_' + Utilities.formatDate(new Date(), "Asia/Seoul", "yyyyMMdd_HHmm"));
+    if (act === 'create_new_sheet' || act === 'create_edit_history_sheet') {
+      var targetName = params.sheetName || ('매일가계부_' + Utilities.formatDate(new Date(), "Asia/Seoul", "yyyyMMdd_HHmm"));
       var newSheet = ss.getSheetByName(targetName);
       if (!newSheet) {
         newSheet = ss.insertSheet(targetName);
       } else {
         newSheet.clear();
       }
-      var headers = params.headers || ['NO', '기록내역(상품명)', '결제일/입금일', '금액', '소분류', '대분류', '상태', '명의자/출금계좌', '거래수단/비고', '동기화일시'];
+      var headers = ['NO', '기록내역(상품명)', '결제일/입금일', '금액', '소분류', '대분류', '상태', '명의자/출금계좌', '거래수단/비고', '동기화일시'];
       newSheet.appendRow(headers);
       newSheet.getRange(1, 1, 1, headers.length).setBackground('#fbf3db').setFontWeight('bold');
 
       var rows = params.records || [];
-      for (var i = 0; i < rows.length; i++) {
+      for (var i = 0; i &lt; rows.length; i++) {
         var r = rows[i];
         newSheet.appendRow([
           i + 1,
@@ -920,42 +930,60 @@ function doPost(e) {
           nowStr
         ]);
       }
-      if (rows.length > 0) {
+      if (rows.length &gt; 0) {
         newSheet.appendRow(['', '합계', '', '=SUM(D2:D' + (rows.length + 1) + ')', '', '', '', '', '', '']);
       }
-      return jsonResponse({ status: 'success', sheetName: targetName });
+      return jsonResponse({ status: 'success', version: '4.0', sheetName: targetName });
     }
 
-    // 2. 적금 입금 / 내역 수정 시 메인 시트 해당 월 칸 자동 업데이트 + 웹입력 장부 기록
-    if (params.action === 'deposit' || params.action === 'update_record' || params.action === 'add_ledger_entry') {
+    // 2. 적금 입금 / 내역 수정 / 웹 가계부 기입 처리
+    if (act === 'deposit' || act === 'update_record' || act === 'add_ledger_entry') {
       var rec = params.record || params;
-      var prodName = rec.productName || rec.title || '';
-      var monthStr = rec.month || '';
-      var dateStr = rec.date || '';
-      var amountNum = Number(rec.amount) || 0;
+      var prodName = rec.productName || params.productName || rec.title || '';
+      var monthStr = (rec.month || params.month || '').toString().trim();
+      var dateStr = (rec.date || params.date || '').toString().trim();
+      var amountNum = Number(rec.amount !== undefined ? rec.amount : params.amount) || 0;
+      var statusStr = rec.status || params.status || 'deposited';
+      var prodKey = cleanProdKey(prodName);
 
-      // (A) 메인 적금 시트(첫번째 탭)에서 상품명과 월을 찾아 날짜/금액 자동 기입
-      var mainSheet = ss.getSheets()[0];
-      var grid = mainSheet.getDataRange().getDisplayValues();
-      var updatedInMain = false;
+      // (A) 월별 적금 통합 리스트 시트(gid=661362148)에서 해당 상품 & 월 셀 찾아 직접 기입
+      var gridSheet = getSheetByGid(ss, 661362148, 1);
+      var grid = gridSheet.getDataRange().getDisplayValues();
+      var updatedBlockSum = -1;
 
-      if (prodName && monthStr) {
-        for (var r = 0; r < grid.length - 1; r++) {
-          for (var c = 0; c < grid[r].length; c++) {
-            var cellText = (grid[r][c] || '').toString().trim();
-            if (cellText && (cellText.indexOf(prodName) !== -1 || prodName.indexOf(cellText) !== -1)) {
-              // 주변 열에서 '월' 헤더 탐색
-              var subRow = grid[r + 1] || [];
-              for (var sc = Math.max(0, c - 2); sc <= Math.min(subRow.length - 1, c + 3); sc++) {
-                if ((subRow[sc] || '').toString().trim() === '월') {
-                  for (var mr = r + 2; mr < grid.length; mr++) {
-                    var mVal = (grid[mr][sc] || '').toString().trim();
-                    if (mVal === '총액' || mVal === '월') break;
-                    if (mVal === monthStr || mVal.indexOf(monthStr) !== -1) {
-                      mainSheet.getRange(mr + 1, sc + 2).setValue(rec.status === 'unpaid' ? '미입금' : dateStr);
-                      if (amountNum > 0) mainSheet.getRange(mr + 1, sc + 3).setValue(amountNum);
-                      updatedInMain = true;
-                      break;
+      if (prodKey &amp;&amp; monthStr) {
+        for (var r = 0; r &lt; grid.length - 1; r++) {
+          var subRow = grid[r + 1] || [];
+          for (var sc = 0; sc &lt; subRow.length; sc++) {
+            if ((subRow[sc] || '').toString().trim() === '월') {
+              var headerCandidate = ((grid[r][sc] || '') + ' ' + (grid[r][sc + 1] || '')).trim();
+              var headerKey = cleanProdKey(headerCandidate);
+              if (headerKey &amp;&amp; (headerKey.indexOf(prodKey) !== -1 || prodKey.indexOf(headerKey) !== -1)) {
+                var runningSum = 0;
+                for (var mr = r + 2; mr &lt; grid.length; mr++) {
+                  var mVal = (grid[mr][sc] || '').toString().trim();
+                  if (mVal === '총액' || mVal === '총급여' || mVal === '월') {
+                    if (mVal === '총액' || mVal === '총급여') {
+                      var totalCell = gridSheet.getRange(mr + 1, sc + 3);
+                      if (!totalCell.getFormula()) totalCell.setValue(runningSum);
+                      updatedBlockSum = runningSum;
+                    }
+                    break;
+                  }
+                  if (mVal === monthStr) {
+                    if (statusStr === 'unpaid') {
+                      gridSheet.getRange(mr + 1, sc + 2).setValue('');
+                      gridSheet.getRange(mr + 1, sc + 3).setValue('');
+                    } else {
+                      gridSheet.getRange(mr + 1, sc + 2).setValue(dateStr);
+                      gridSheet.getRange(mr + 1, sc + 3).setValue(amountNum);
+                      runningSum += amountNum;
+                    }
+                  } else {
+                    var existingDate = (grid[mr][sc + 1] || '').toString().trim();
+                    var existingAmt = Number((grid[mr][sc + 2] || '').toString().replace(/[^0-9.-]+/g, '')) || 0;
+                    if (existingDate &amp;&amp; existingDate !== '미입금' &amp;&amp; existingAmt &gt; 0) {
+                      runningSum += existingAmt;
                     }
                   }
                 }
@@ -965,7 +993,21 @@ function doPost(e) {
         }
       }
 
-      // (B) [매일가계부_웹입력] 시트에 모든 추가/수정 내역 누적 기록 (시트가 없으면 자동 생성)
+      // (B) 적금리스트 시트(gid=7284588)의 총금액(I열)도 함께 갱신
+      if (prodKey &amp;&amp; updatedBlockSum &gt;= 0) {
+        var masterSheet = getSheetByGid(ss, 7284588, 0);
+        var mGrid = masterSheet.getDataRange().getDisplayValues();
+        for (var mr2 = 0; mr2 &lt; mGrid.length; mr2++) {
+          var mName = cleanProdKey(mGrid[mr2][3] || mGrid[mr2][2] || '');
+          if (mName &amp;&amp; (mName.indexOf(prodKey) !== -1 || prodKey.indexOf(mName) !== -1)) {
+            var mTotalCell = masterSheet.getRange(mr2 + 1, 9); // Col I (총금액)
+            if (!mTotalCell.getFormula()) mTotalCell.setValue(updatedBlockSum);
+            break;
+          }
+        }
+      }
+
+      // (C) [매일가계부_웹입력] 시트에 모든 웹 입력 이력 누적 기록
       var ledgerSheet = ss.getSheetByName('매일가계부_웹입력');
       if (!ledgerSheet) {
         ledgerSheet = ss.insertSheet('매일가계부_웹입력');
@@ -973,50 +1015,45 @@ function doPost(e) {
         ledgerSheet.getRange(1, 1, 1, 10).setBackground('#fbf3db').setFontWeight('bold');
       }
       ledgerSheet.appendRow([
-        prodName,
-        monthStr,
-        dateStr,
-        amountNum,
+        prodName, monthStr, dateStr, amountNum,
         rec.subCategory || '예적금/가계부',
         rec.mainCategory || '저축/지출',
-        rec.status || 'deposited',
+        statusStr,
         rec.owner || '가족공용',
         rec.method || rec.memo || '웹 대시보드 기입',
         nowStr
       ]);
 
-      return jsonResponse({ status: 'success', updatedInMain: updatedInMain });
+      return jsonResponse({ status: 'success', version: '4.0', updatedBlockSum: updatedBlockSum });
     }
 
-    // 3. 신규 적금 상품 등록 시 [적금리스트] 탭에 자동 행 추가
-    if (params.action === 'new_product') {
-      var listSheet = ss.getSheetByName('적금리스트') || ss.getSheets()[1];
-      if (listSheet) {
-        var isJuwon = params.owner === '주원' ? 'O' : '';
-        var isJihyeon = params.owner === '지헌' ? 'O' : '';
-        var isJunyeong = params.owner === '준영' ? 'O' : '';
-        listSheet.appendRow(['', '', params.name, isJuwon, isJihyeon, isJunyeong, Number(params.monthly) || 0, Number(params.initial) || 0, params.startDate || '-', params.endDate || '-']);
-      }
-      return jsonResponse({ status: 'success' });
+    // 3. 신규 적금 상품 등록 시 [적금리스트](gid=7284588)에 자동 행 추가
+    if (act === 'new_product') {
+      var listSheet = getSheetByGid(ss, 7284588, 0);
+      var isJuwon = params.owner === '주원' ? 'O' : 'X';
+      var isJihyeon = params.owner === '지헌' ? 'O' : 'X';
+      var isJunyeong = params.owner === '준영' ? 'O' : 'X';
+      listSheet.appendRow(['', '', '', params.name, isJuwon, isJihyeon, isJunyeong, Number(params.monthly) || 0, Number(params.initial) || 0, params.startDate || '-', params.endDate || '-']);
+      return jsonResponse({ status: 'success', version: '4.0' });
     }
 
-    // 4. 병원비/조리원비 지출 추가 시 해당 시트에 자동 행 추가
-    if (params.action === 'add_hospital_expense') {
-      var hospSheet = ss.getSheetByName('조리원/병원비') || ss.getSheets()[2];
-      if (hospSheet) {
-        hospSheet.appendRow([params.date, params.category, params.details, Number(params.amount) || 0, params.note || '-']);
-      }
-      return jsonResponse({ status: 'success' });
+    // 4. 병원비/조리원비 지출 추가 시 (gid=1541600042) 자동 행 추가
+    if (act === 'add_hospital_expense') {
+      var hospSheet = getSheetByGid(ss, 1541600042, 2);
+      hospSheet.appendRow(['', params.date, params.category, params.details, Number(params.amount) || 0, params.note || '-']);
+      return jsonResponse({ status: 'success', version: '4.0' });
     }
 
     // 5. 일정/메모 저장
-    var memoSheet = ss.getSheetByName('일정메모');
-    if (!memoSheet) {
-      memoSheet = ss.insertSheet('일정메모');
-      memoSheet.appendRow(['날짜', '시간', '카테고리', '내용', '등록일시']);
+    if (params.date &amp;&amp; params.content) {
+      var memoSheet = ss.getSheetByName('일정메모');
+      if (!memoSheet) {
+        memoSheet = ss.insertSheet('일정메모');
+        memoSheet.appendRow(['날짜', '시간', '카테고리', '내용', '등록일시']);
+      }
+      memoSheet.appendRow([params.date, params.time || '', params.category || '메모', params.content, nowStr]);
     }
-    memoSheet.appendRow([params.date, params.time, params.category, params.content, nowStr]);
-    return jsonResponse({ status: 'success' });
+    return jsonResponse({ status: 'success', version: '4.0' });
 
   } catch (err) {
     return jsonResponse({ status: 'error', message: err.message });
@@ -1026,10 +1063,6 @@ function doPost(e) {
 function jsonResponse(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
-}
-
-function fillAllAccounts() {
-  SpreadsheetApp.getUi().alert('자산 합계 동기화가 완료되었습니다!');
 }</code></pre>
                         </div>
                     </div>

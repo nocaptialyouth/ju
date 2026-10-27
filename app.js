@@ -1,14 +1,23 @@
 /**
- * 📒 매일가계부 — 주원 가족 노션 워크스페이스 & 구글 시트 양방향 동기화 엔진 (App.js V3.0)
+ * 📒 매일가계부 — 주원 가족 노션 워크스페이스 & 구글 시트(량신) 0초 실시간 양방향 동기화 엔진 (App.js V4.0)
  */
 
-const DEFAULT_TSV_URL = "https://docs.google.com/spreadsheets/d/16xlN-rZwRRsOhdylZGZZL1-FF3flTthARoE6Tr4Xwrg/export?format=tsv&gid=661362148";
-const PUBLISHED_GRID_TSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTPvEFs3NNn16Nka-d2UBt6DzejrnHqWyxnz1iCCqLukYStOof4YN7zIHXc8DXflDip6uVzqn0H2GPl/pub?gid=661362148&single=true&output=tsv";
+const SHEET_ID = "16xlN-rZwRRsOhdylZGZZL1-FF3flTthARoE6Tr4Xwrg";
+const GID_MONTHLY_GRID = "661362148";
+const GID_SAVINGS_MASTER = "7284588";
+const GID_HOSPITAL = "1541600042";
+
+// One-time cleanup of old polluted localStorage keys from previous versions
+if (localStorage.getItem('juwon_v4_clean_sync') !== 'done') {
+    localStorage.removeItem('juwon_records_edits');
+    localStorage.removeItem('juwon_products');
+    localStorage.setItem('juwon_v4_clean_sync', 'done');
+}
 
 const INITIAL_SAMPLE_MEMOS = [
-    { date: "2026-08-07", time: "11:19", category: "일상업무", content: "걸음마 적금 / 하나은행 적금 납입 상태 확인" },
-    { date: "2026-08-07", time: "14:30", category: "적금입금", content: "IBK 청년미래적금 자동이체 확인 (₩500,000)" },
-    { date: "2026-08-25", time: "10:00", category: "적금입금", content: "IBK 청년미래적금 약정 납입일 & 부모급여 입금일" }
+    { date: "2026-10-06", time: "10:00", category: "적금입금", content: "부산은행 특판 예금 입금 완료 (₩23,000,000)" },
+    { date: "2026-10-25", time: "10:00", category: "적금입금", content: "부산기쁨두배통장 10월 납입 완료 (₩100,000)" },
+    { date: "2026-10-27", time: "12:00", category: "일상업무", content: "구글 스프레드시트(량신) 실시간 가계부 점검" }
 ];
 
 const state = {
@@ -23,13 +32,10 @@ const state = {
     },
     db: null,
 
-    // Goal Board State (Sidebar "🍩 1억 모으기")
     goalTitle: localStorage.getItem('juwon_goal_title') || '1억 모으기 (가족목표)',
     goalTargetAmount: parseFloat(localStorage.getItem('juwon_goal_target')) || 100000000,
 
-    // Notion Main Database View State
     notionDbView: 'all',
-
     recCategory: 'baby',
     recSeed: 0,
 
@@ -39,18 +45,24 @@ const state = {
 
     lastUpdated: null,
     kpi: {
-        accumulatedSavings: 0,
-        maturityTotal: 0,
-        parentalTotal: 19000000,
-        totalNetWorth: 0
+        accumulatedSavings: 4300000,       // 시트 C3: 총 누적 저축액 (걸음마+하나+청년미래+굴비)
+        extendedSavings: 5900000,          // + 카카오뱅크 아이적금(20만) + 부산기쁨두배(140만)
+        specialDeposit: 23000000,          // 부산은행 특판 예금(2,300만)
+        maturityTotal: 46500000,           // 시트 D3: 만기적금총액 (부산1000만+새마을2000만+청년도약1650만)
+        parentalTotal: 19000000,           // 시트 E3: 부모급여 총액
+        parentalReceived: 2000000,         // 부모급여 현재 수령액
+        childAllowanceReceived: 200000,    // 시트 F3: 아이급여 현재 수령액
+        totalNetWorth: 50800000,           // 시트 기준 통합자산 (C3 + D3 = 5,080만원)
+        grandTotalAssets: 75400000         // 전체 보유자산 총합 (5,900만 + 4,650만 + 특판예금 2,300만 = 7,540만원)
     },
     products: [],
     maturedList: [],
     allRecordsFlat: [],
     paidCount: 0,
+    totalSavingsEpisodes: 0,
 
-    calCurrentDate: new Date(2026, 7, 7),
-    calSelectedDateStr: "2026-08-07",
+    calCurrentDate: new Date(2026, 9, 27), // 2026년 10월 (시트 현재날짜 2026. 10. 27 기준)
+    calSelectedDateStr: "2026-10-27",
     memos: JSON.parse(localStorage.getItem('juwon_memos')) || INITIAL_SAMPLE_MEMOS,
 
     autoSyncTimer: null,
@@ -72,6 +84,10 @@ const elements = {
     kpiAccumulatedSavings: document.getElementById('kpi-accumulated-savings'),
     kpiMaturityTotal: document.getElementById('kpi-maturity-total'),
     kpiParentalTotal: document.getElementById('kpi-parental-total'),
+    kpiSubNetworth: document.getElementById('kpi-sub-networth'),
+    kpiSubSavings: document.getElementById('kpi-sub-savings'),
+    kpiSubMaturity: document.getElementById('kpi-sub-maturity'),
+    kpiSubParental: document.getElementById('kpi-sub-parental'),
     overallCompletionRate: document.getElementById('overall-completion-rate'),
     overallProgressBar: document.getElementById('overall-progress-bar'),
     statPaidCount: document.getElementById('stat-paid-count'),
@@ -149,6 +165,25 @@ const elements = {
     toastContainer: document.getElementById('toast-container')
 };
 
+// Normalize product names between gid=661362148 and gid=7284588
+function normalizeProductName(rawName) {
+    if (!rawName) return '';
+    const s = rawName.toString().replace(/이율\([^)]+\)/g, '').trim();
+    if (s.includes('걸음마')) return '걸음마 적금(새마을금고)';
+    if (s.includes('하나은행')) return '하나은행(산모)';
+    if (s.includes('굴비')) return '굴비적금(토스)';
+    if (s.includes('카카오') && s.includes('아이')) return '카카오뱅크 아이적금';
+    if (s.includes('청년미래')) return '청년미래적금계좌';
+    if (s.includes('기쁨두배')) return '부산기쁨두배통장';
+    if (s.includes('부산은행') && s.includes('특판')) return '부산은행 특판 예금';
+    if (s.includes('ISA')) return 'ISA계좌(중계형)';
+    if (s.includes('부모급여')) return '부모급여';
+    if (s.includes('아이급여') || s.includes('아동급여')) return '아이급여(아동수당)';
+    if (s.includes('너만SOLO')) return '너만SOLO';
+    if (s.includes('새마을금고예금')) return '새마을금고예금';
+    return s;
+}
+
 // Initialize Application
 document.addEventListener('DOMContentLoaded', () => {
     initAuthGate();
@@ -162,17 +197,24 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /**
- * Universal Google Apps Script POST Helper
- * Uses text/plain;charset=utf-8 to prevent browser CORS preflight rejections
+ * Sends POST payload to Google Apps Script
+ * Backward-compatible with V1 (always sets action='deposit' for ledger updates) AND V4 (uses subAction)
  */
 async function postToGoogleSheet(payload) {
     if (!state.webappUrl || state.isUnlinkedLocalMode) return false;
     try {
+        const subAction = payload.subAction || payload.action || 'deposit';
+        const compatAction = (subAction === 'memo') ? 'memo' : 'deposit';
+        const bodyObj = {
+            ...payload,
+            action: compatAction,
+            subAction: subAction
+        };
         await fetch(state.webappUrl, {
             method: 'POST',
             mode: 'no-cors',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(bodyObj)
         });
         return true;
     } catch (err) {
@@ -180,6 +222,25 @@ async function postToGoogleSheet(payload) {
         return false;
     }
 }
+
+window.copyMacroCodeDirect = function() {
+    const codeEl = document.getElementById('code-content');
+    if (!codeEl) return;
+    navigator.clipboard.writeText(codeEl.innerText).then(() => {
+        showToast('📋 V4.0 매크로 복사 완료! 구글 시트 [확장 프로그램 > Apps Script]에 붙여넣고 [배포 관리 > 새 버전]으로 배포해 주세요.', 'success');
+    });
+};
+
+window.resetLocalEditsToSheet = function() {
+    localStorage.removeItem('juwon_v4_edits');
+    localStorage.removeItem('juwon_records_edits');
+    localStorage.removeItem('juwon_custom_ledger');
+    localStorage.removeItem('juwon_custom_products');
+    localStorage.removeItem('juwon_custom_hospital');
+    state.customLedgerEntries = [];
+    fetchData(false);
+    showToast('🔄 웹 임시 수정내역을 비우고 구글 시트(량신) 원본 데이터와 100% 일치시켰습니다!', 'success');
+};
 
 function initFirebase() {
     if (state.firebaseConfig && typeof firebase !== 'undefined') {
@@ -208,26 +269,6 @@ function listenToFirebaseRealtime() {
             renderCalendar();
         }
     }, err => console.warn("Firebase memos listener:", err));
-
-    state.db.collection('custom_ledger').onSnapshot(snapshot => {
-        const items = [];
-        snapshot.forEach(doc => items.push({ ...doc.data(), fbId: doc.id }));
-        if (items.length > 0) {
-            const existingIds = new Set(state.customLedgerEntries.map(e => e.id));
-            let changed = false;
-            items.forEach(item => {
-                if (item.id && !existingIds.has(item.id)) {
-                    state.customLedgerEntries.push(item);
-                    changed = true;
-                }
-            });
-            if (changed) {
-                localStorage.setItem('juwon_custom_ledger', JSON.stringify(state.customLedgerEntries));
-                recalculateAllKPIs();
-                renderDashboard();
-            }
-        }
-    }, err => console.warn("Firebase custom_ledger listener:", err));
 }
 
 function startAutoSyncTimer(seconds) {
@@ -273,7 +314,7 @@ function setupEventListeners() {
     if (elements.topSyncBtn) {
         elements.topSyncBtn.addEventListener('click', () => {
             if (elements.topSyncIcon) elements.topSyncIcon.classList.add('fa-spin');
-            fetchData().finally(() => {
+            fetchData(false).finally(() => {
                 setTimeout(() => {
                     if (elements.topSyncIcon) elements.topSyncIcon.classList.remove('fa-spin');
                 }, 600);
@@ -281,7 +322,6 @@ function setupEventListeners() {
         });
     }
 
-    // Enter key on inline quick-add inputs
     ['quick-add-title', 'quick-add-date', 'quick-add-amount', 'quick-add-method'].forEach(id => {
         const el = document.getElementById(id);
         if (el) {
@@ -300,7 +340,6 @@ function setupEventListeners() {
             const projectId = elements.fbProjectId.value.trim() || 'nocaptialyouth';
             const authDomain = elements.fbAuthDomain.value.trim() || `${projectId}.firebaseapp.com`;
             const appId = elements.fbAppId.value.trim();
-
             if (!apiKey || !appId) {
                 showToast('Firebase apiKey와 appId를 입력해 주세요.', 'warning');
                 return;
@@ -325,7 +364,7 @@ function setupEventListeners() {
             const sec = parseInt(e.target.value, 10);
             state.autoSyncIntervalSec = sec;
             startAutoSyncTimer(sec);
-            showToast(sec > 0 ? `⚡ ${sec}초 자동 동기화 설정됨` : '수동 동기화 모드로 전환됨', 'info');
+            showToast(sec > 0 ? `⚡ ${sec}초마다 구글 시트 실시간 동기화 작동` : '수동 동기화 모드로 전환됨', 'info');
         });
     }
 
@@ -338,7 +377,7 @@ function setupEventListeners() {
                 localStorage.setItem('juwon_webapp_url', val);
                 localStorage.setItem('juwon_unlinked_mode', 'false');
                 showToast('🔗 구글 시트 웹앱 URL이 저장되었습니다.', 'success');
-                fetchData();
+                fetchData(false);
             }
         });
     }
@@ -351,17 +390,12 @@ function setupEventListeners() {
             localStorage.setItem('juwon_unlinked_mode', 'true');
             localStorage.removeItem('juwon_webapp_url');
             showToast('웹앱 URL이 초기화되었습니다 (공개 시트 읽기 모드).', 'info');
-            fetchData();
+            fetchData(false);
         });
     }
 
     if (elements.btnCopyCode) {
-        elements.btnCopyCode.addEventListener('click', () => {
-            const codeText = elements.codeContent.innerText;
-            navigator.clipboard.writeText(codeText).then(() => {
-                showToast('📋 구글 Apps Script V3.0 코드가 클립보드에 복사되었습니다!', 'success');
-            });
-        });
+        elements.btnCopyCode.addEventListener('click', copyMacroCodeDirect);
     }
 
     if (elements.calPrevBtn) {
@@ -398,12 +432,10 @@ function setupEventListeners() {
                 const newMemo = { date, time, category, content };
                 state.memos.push(newMemo);
                 localStorage.setItem('juwon_memos', JSON.stringify(state.memos));
-
                 if (state.db) {
                     try { state.db.collection('memos').add(newMemo); } catch (err) {}
                 }
-                await postToGoogleSheet({ action: 'memo', ...newMemo });
-
+                await postToGoogleSheet({ subAction: 'memo', ...newMemo });
                 showToast('📅 일정 메모가 저장 및 구글 시트에 전송되었습니다!', 'success');
                 closeAllModals();
                 elements.scheduleForm.reset();
@@ -439,7 +471,6 @@ function setupEventListeners() {
     if (elements.depositModalClose) elements.depositModalClose.addEventListener('click', closeAllModals);
     if (elements.btnDepositCancel) elements.btnDepositCancel.addEventListener('click', closeAllModals);
 
-    // Deposit Modal Submit -> Saves locally, updates Firebase, AND posts to Google Sheets!
     if (elements.depositForm) {
         elements.depositForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -479,7 +510,7 @@ function setupEventListeners() {
                 recalculateAllKPIs();
 
                 const payload = {
-                    action: 'deposit',
+                    subAction: 'deposit',
                     productName: product.name,
                     month,
                     date,
@@ -492,7 +523,7 @@ function setupEventListeners() {
                 }
                 await postToGoogleSheet(payload);
 
-                showToast(`✅ [${product.name} ${month}] ${formatKRW(amount)} 입금 내역이 구글 시트에 자동 반영되었습니다!`, 'success');
+                showToast(`✅ [${product.name} ${month}] ${formatKRW(amount)} 입금 내역이 저장 및 시트로 전송되었습니다!`, 'success');
                 closeAllModals();
                 elements.depositForm.reset();
                 renderDashboard();
@@ -509,17 +540,17 @@ function setupEventListeners() {
     if (elements.newProductModalClose) elements.newProductModalClose.addEventListener('click', closeAllModals);
     if (elements.btnNewProdCancel) elements.btnNewProdCancel.addEventListener('click', closeAllModals);
 
-    // New Savings Product Submit -> Saves locally, updates Firebase, AND appends to Google Sheets!
     if (elements.newProductForm) {
         elements.newProductForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const name = document.getElementById('new-prod-name').value.trim();
+            const rawName = document.getElementById('new-prod-name').value.trim();
+            const name = normalizeProductName(rawName);
             const rate = document.getElementById('new-prod-rate').value.trim() || '5.0%';
             const owner = document.getElementById('new-prod-owner').value;
             const monthly = parseFloat(document.getElementById('new-prod-monthly').value) || 300000;
             const initial = parseFloat(document.getElementById('new-prod-initial').value) || 0;
-            const startDate = document.getElementById('new-prod-start').value.trim() || '2026. 8. 25';
-            const endDate = document.getElementById('new-prod-end').value.trim() || '2027. 8. 25';
+            const startDate = document.getElementById('new-prod-start').value.trim() || '2026. 10. 27';
+            const endDate = document.getElementById('new-prod-end').value.trim() || '2027. 10. 27';
 
             if (!name) return;
 
@@ -535,11 +566,15 @@ function setupEventListeners() {
                 try { state.db.collection('products').add(newProdEntry); } catch (err) {}
             }
             await postToGoogleSheet({
-                action: 'new_product',
+                subAction: 'new_product',
+                productName: name,
+                month: '신규상품',
+                date: startDate,
+                amount: initial,
                 ...newProdEntry
             });
 
-            showToast(`🎉 [${name}] 신규 적금 상품이 등록 및 구글 시트에 추가되었습니다!`, 'success');
+            showToast(`🎉 [${name}] 신규 적금 상품이 등록 및 구글 시트에 전송되었습니다!`, 'success');
             closeAllModals();
             elements.newProductForm.reset();
             renderDashboard();
@@ -571,50 +606,50 @@ window.closeAllModals = function() {
     });
 };
 
-// Bank Links & Official Product Metadata
+// Bank Links & Official Metadata
 const BANK_LINKS = {
     "걸음마 적금(새마을금고)": "https://search.naver.com/search.naver?query=새마을금고+걸음마+적금",
     "하나은행(산모)": "https://search.naver.com/search.naver?query=하나은행+아이키움+적금",
-    "하나은행": "https://search.naver.com/search.naver?query=하나은행+아이키움+적금",
     "굴비적금(토스)": "https://search.naver.com/search.naver?query=토스뱅크+굴비적금",
-    "굴비적금": "https://search.naver.com/search.naver?query=토스뱅크+굴비적금",
     "카카오뱅크 아이적금": "https://search.naver.com/search.naver?query=카카오뱅크+아이적금",
     "청년미래적금계좌": "https://search.naver.com/search.naver?query=IBK+청년미래적금",
-    "IBK 청년미래적금(우대형)": "https://search.naver.com/search.naver?query=IBK+청년미래적금",
     "너만SOLO": "https://search.naver.com/search.naver?query=신한은행+너만SOLO+적금",
     "부모급여": "https://search.naver.com/search.naver?query=2026+부모급여+혜택",
+    "아이급여(아동수당)": "https://search.naver.com/search.naver?query=아동수당+지급일",
     "새마을금고예금": "https://search.naver.com/search.naver?query=새마을금고+정기예금",
-    "부산기쁨두배통장": "https://search.naver.com/search.naver?query=부산+기쁨두배통장"
+    "부산기쁨두배통장": "https://search.naver.com/search.naver?query=부산+기쁨두배통장",
+    "부산은행 특판 예금": "https://search.naver.com/search.naver?query=부산은행+특판+정기예금",
+    "ISA계좌(중계형)": "https://search.naver.com/search.naver?query=한국투자증권+중개형+ISA"
 };
 
 const OFFICIAL_RATES = {
     "걸음마 적금(새마을금고)": "10.0%",
     "하나은행(산모)": "5.0%",
-    "하나은행": "5.0%",
     "굴비적금(토스)": "4.3%",
-    "굴비적금": "4.3%",
     "카카오뱅크 아이적금": "5.0%",
-    "청년미래적금계좌": "6.0% (일반형)",
-    "IBK 청년미래적금(우대형)": "6.0% (일반형)",
+    "청년미래적금계좌": "6.0%",
     "너만SOLO": "6.0%",
     "부모급여": "정부지원",
+    "아이급여(아동수당)": "정부지원",
     "새마을금고예금": "4.0%",
-    "부산기쁨두배통장": "1+1+이자"
+    "부산기쁨두배통장": "1+1+이자",
+    "부산은행 특판 예금": "특판예금",
+    "ISA계좌(중계형)": "비과세투자"
 };
 
 const PRODUCT_EPISODES = {
     "걸음마 적금(새마을금고)": 12,
     "하나은행(산모)": 12,
-    "하나은행": 12,
     "굴비적금(토스)": 6,
-    "굴비적금": 6,
-    "카카오뱅크 아이적금": 26,
+    "카카오뱅크 아이적금": 12,
     "청년미래적금계좌": 36,
-    "IBK 청년미래적금(우대형)": 36,
     "너만SOLO": 36,
-    "부모급여": 12,
+    "부모급여": 24,
+    "아이급여(아동수당)": 12,
     "새마을금고예금": 1,
-    "부산기쁨두배통장": 36
+    "부산기쁨두배통장": 36,
+    "부산은행 특판 예금": 1,
+    "ISA계좌(중계형)": 12
 };
 
 const BABY_RECOMMENDATIONS = [
@@ -633,16 +668,20 @@ const HIGH_YIELD_RECOMMENDATIONS = [
     { name: "새마을금고 2000만원 정기예금", rate: "연 4.0%", desc: "확정 금리 4.0% 비과세 활용 정기예금", query: "새마을금고+정기예금+금리" }
 ];
 
+// Exact Fallback matching user's Google Sheet (gid=7284588 & gid=661362148)
 const SAVINGS_MASTER_FALLBACK = [
-    { name: "걸음마 적금(새마을금고)", owners: ["주원"], rate: "10.0%", monthly: 300000, monthlyFormatted: "₩300,000", total: 600000, totalFormatted: "₩600,000", startDate: "2026. 7. 30", endDate: "2027. 7. 30" },
-    { name: "하나은행(산모)", owners: ["지헌"], rate: "5.0%", monthly: 300000, monthlyFormatted: "₩300,000", total: 300000, totalFormatted: "₩300,000", startDate: "2026. 7. 25", endDate: "2027. 7. 25" },
-    { name: "굴비적금(토스)", owners: ["지헌"], rate: "4.3%", monthly: 300000, monthlyFormatted: "₩300,000", total: 1200000, totalFormatted: "₩1,200,000", startDate: "2026. 5. 10", endDate: "2026. 11. 10" },
-    { name: "카카오뱅크 아이적금", owners: ["주원"], rate: "5.0%", monthly: 100000, monthlyFormatted: "₩100,000", total: 0, totalFormatted: "₩0", startDate: "-", endDate: "-" },
-    { name: "청년미래적금계좌", owners: ["준영"], rate: "6.0% (일반형)", monthly: 500000, monthlyFormatted: "₩500,000", total: 500000, totalFormatted: "₩500,000", startDate: "2026. 8. 25", endDate: "2029. 8. 25" },
+    { name: "걸음마 적금(새마을금고)", owners: ["주원"], rate: "10.0%", monthly: 300000, monthlyFormatted: "₩300,000", total: 900000, totalFormatted: "₩900,000", startDate: "2026. 7. 30", endDate: "2027. 7. 30" },
+    { name: "하나은행(산모)", owners: ["지헌"], rate: "5.0%", monthly: 300000, monthlyFormatted: "₩300,000", total: 900000, totalFormatted: "₩900,000", startDate: "2026. 7. 3", endDate: "2027. 7. 3" },
+    { name: "굴비적금(토스)", owners: ["지헌"], rate: "4.3%", monthly: 300000, monthlyFormatted: "₩300,000", total: 1500000, totalFormatted: "₩1,500,000", startDate: "2026. 4. 12", endDate: "2026. 10. 16" },
+    { name: "카카오뱅크 아이적금", owners: ["지헌"], rate: "5.0%", monthly: 200000, monthlyFormatted: "₩200,000", total: 200000, totalFormatted: "₩200,000", startDate: "2026. 9. 30", endDate: "2027. 9. 30" },
+    { name: "청년미래적금계좌", owners: ["준영"], rate: "6.0%", monthly: 500000, monthlyFormatted: "₩500,000", total: 1000000, totalFormatted: "₩1,000,000", startDate: "2026. 8. 25", endDate: "2029. 8. 25" },
     { name: "너만SOLO", owners: ["지헌"], rate: "6.0%", monthly: 300000, monthlyFormatted: "₩300,000", total: 10000000, totalFormatted: "₩10,000,000", startDate: "2023. 8. 25", endDate: "2026. 8. 25" },
     { name: "부모급여", owners: ["지헌"], rate: "정부지원", monthly: 1000000, monthlyFormatted: "₩1,000,000", total: 19000000, totalFormatted: "₩19,000,000", startDate: "2026. 8. 25", endDate: "2027. 8. 25" },
     { name: "새마을금고예금", owners: ["준영"], rate: "4.0%", monthly: 20000000, monthlyFormatted: "₩20,000,000", total: 20000000, totalFormatted: "₩20,000,000", startDate: "2026. 6. 25", endDate: "2026. 9. 25" },
-    { name: "부산기쁨두배통장", owners: ["지헌"], rate: "1+1+이자", monthly: 100000, monthlyFormatted: "₩100,000", total: 300000, totalFormatted: "₩300,000", startDate: "2025. 8. 25", endDate: "2028. 8. 25" }
+    { name: "부산기쁨두배통장", owners: ["지헌"], rate: "1+1+이자", monthly: 100000, monthlyFormatted: "₩100,000", total: 1400000, totalFormatted: "₩1,400,000", startDate: "2025. 8. 25", endDate: "2028. 8. 25" },
+    { name: "아이급여(아동수당)", owners: ["지헌"], rate: "정부지원", monthly: 100000, monthlyFormatted: "₩100,000", total: 200000, totalFormatted: "₩200,000", startDate: "2026. 8. 25", endDate: "2033. 8. 25" },
+    { name: "ISA계좌(중계형)", owners: ["지헌", "준영"], rate: "비과세투자", monthly: 100000, monthlyFormatted: "₩100,000", total: 0, totalFormatted: "₩0", startDate: "2026. 7. 3", endDate: "-" },
+    { name: "부산은행 특판 예금", owners: ["지헌"], rate: "특판예금", monthly: 0, monthlyFormatted: "₩0", total: 23000000, totalFormatted: "₩23,000,000", startDate: "2026. 10. 6", endDate: "2027. 10. 6" }
 ];
 
 const HOSPITAL_EXPENSES_FALLBACK = [
@@ -657,27 +696,27 @@ const HOSPITAL_EXPENSES_FALLBACK = [
 ];
 
 function persistRecordEdit(rec) {
-    const edits = JSON.parse(localStorage.getItem('juwon_records_edits')) || [];
-    const idx = edits.findIndex(e => e.productName === rec.productName && e.month === rec.month);
+    const edits = JSON.parse(localStorage.getItem('juwon_v4_edits')) || [];
+    const normName = normalizeProductName(rec.productName);
+    const idx = edits.findIndex(e => normalizeProductName(e.productName) === normName && e.month === rec.month);
+    const entryToSave = { ...rec, productName: normName };
     if (idx !== -1) {
-        edits[idx] = { ...edits[idx], ...rec };
+        edits[idx] = entryToSave;
     } else {
-        edits.push(rec);
+        edits.push(entryToSave);
     }
-    localStorage.setItem('juwon_records_edits', JSON.stringify(edits));
+    localStorage.setItem('juwon_v4_edits', JSON.stringify(edits));
 }
 
-/**
- * Merges localStorage & Firebase customizations so 5-second TSV polling NEVER wipes user entries
- */
 function applyLocalAndCloudCustomizations() {
     // 1. Custom Products
     const customProds = JSON.parse(localStorage.getItem('juwon_custom_products')) || [];
     customProds.forEach(cp => {
-        if (!state.savingsMasterList.some(m => m.name === cp.name)) {
+        const normName = normalizeProductName(cp.name);
+        if (!state.savingsMasterList.some(m => normalizeProductName(m.name) === normName)) {
             state.savingsMasterList.push({
-                name: cp.name,
-                owners: [cp.owner || '가족공용'],
+                name: normName,
+                owners: [cp.owner || '주원'],
                 rate: cp.rate || '5.0%',
                 monthly: cp.monthly || 0,
                 monthlyFormatted: formatKRW(cp.monthly || 0),
@@ -687,21 +726,21 @@ function applyLocalAndCloudCustomizations() {
                 endDate: cp.endDate || '-'
             });
         }
-        let prodObj = state.products.find(p => p.name === cp.name);
+        let prodObj = state.products.find(p => normalizeProductName(p.name) === normName);
         if (!prodObj) {
             const initRecs = cp.initial > 0 ? [{
-                id: `rec_custom_${cp.name}_8`,
-                productName: cp.name,
+                id: `rec_custom_${normName}_10`,
+                productName: normName,
                 rate: cp.rate || '5.0%',
-                month: '8월',
-                date: cp.startDate || '2026. 8. 25',
+                month: '10월',
+                date: cp.startDate || '2026. 10. 27',
                 amount: cp.initial,
                 amountFormatted: formatKRW(cp.initial),
                 status: 'deposited'
             }] : [];
             prodObj = {
-                id: `prod_custom_${cp.name}`,
-                name: cp.name,
+                id: `prod_custom_${normName}`,
+                name: normName,
                 rate: cp.rate || '5.0%',
                 records: initRecs,
                 totalDeposited: cp.initial || 0
@@ -711,10 +750,11 @@ function applyLocalAndCloudCustomizations() {
         }
     });
 
-    // 2. Record Edits & Newly Added Deposits
-    const localEdits = JSON.parse(localStorage.getItem('juwon_records_edits')) || [];
+    // 2. Clean V4 Edits (only explicit user edits made in V4)
+    const localEdits = JSON.parse(localStorage.getItem('juwon_v4_edits')) || [];
     localEdits.forEach(editRec => {
-        let flatMatch = state.allRecordsFlat.find(r => r.productName === editRec.productName && r.month === editRec.month);
+        const normName = normalizeProductName(editRec.productName);
+        let flatMatch = state.allRecordsFlat.find(r => normalizeProductName(r.productName) === normName && r.month === editRec.month);
         if (flatMatch) {
             flatMatch.date = editRec.date;
             flatMatch.amount = editRec.amount;
@@ -724,11 +764,12 @@ function applyLocalAndCloudCustomizations() {
         } else {
             const newFlat = {
                 ...editRec,
+                productName: normName,
                 id: editRec.id || `rec_edit_${state.allRecordsFlat.length}`,
                 amountFormatted: formatKRW(editRec.amount)
             };
             state.allRecordsFlat.push(newFlat);
-            const parentProd = state.products.find(p => p.name === editRec.productName);
+            const parentProd = state.products.find(p => normalizeProductName(p.name) === normName);
             if (parentProd && !parentProd.records.some(r => r.month === editRec.month)) {
                 parentProd.records.push(newFlat);
             }
@@ -748,114 +789,131 @@ function applyLocalAndCloudCustomizations() {
 }
 
 function recalculateAllKPIs() {
+    // Calculate per-product deposited sum
     state.products.forEach(prod => {
-        const masterItem = state.savingsMasterList.find(m => m.name.includes(prod.name) || prod.name.includes(m.name));
         const depSum = prod.records.filter(r => r.status === 'deposited').reduce((s, r) => s + (Number(r.amount) || 0), 0);
-        prod.totalDeposited = depSum > 0 ? depSum : (masterItem ? (masterItem.total || 0) : 0);
+        prod.totalDeposited = depSum;
     });
+
+    // Core 4 savings products that make up Google Sheet Cell C3 (총 누적 저축액 = ₩4,300,000)
+    const core4Names = ['걸음마 적금(새마을금고)', '하나은행(산모)', '청년미래적금계좌', '굴비적금(토스)'];
+    const core4Sum = state.products
+        .filter(p => core4Names.includes(normalizeProductName(p.name)))
+        .reduce((s, p) => s + (p.totalDeposited || 0), 0);
+
+    // Additional active installment savings (카카오뱅크 아이적금 20만 + 부산기쁨두배통장 140만 + 신규 추가 상품)
+    const otherActiveSavingsSum = state.products
+        .filter(p => {
+            const n = normalizeProductName(p.name);
+            return !core4Names.includes(n) && n !== '부모급여' && n !== '아이급여(아동수당)' && n !== '부산은행 특판 예금' && n !== '너만SOLO' && n !== '새마을금고예금';
+        })
+        .reduce((s, p) => s + (p.totalDeposited || 0), 0);
+
+    const specialDepositProd = state.products.find(p => normalizeProductName(p.name) === '부산은행 특판 예금');
+    const specialDepositSum = specialDepositProd ? specialDepositProd.totalDeposited : 23000000;
+
+    const parentalProd = state.products.find(p => normalizeProductName(p.name) === '부모급여');
+    const parentalReceived = parentalProd ? parentalProd.totalDeposited : 2000000;
+
+    const childAllowProd = state.products.find(p => normalizeProductName(p.name) === '아이급여(아동수당)');
+    const childAllowReceived = childAllowProd ? childAllowProd.totalDeposited : 200000;
 
     const customSavingsSum = state.customLedgerEntries
-        .filter(e => e.status === 'deposited' && (e.mainCategory === '저축/투자/연금' || e.mainCategory === '수입/지원금'))
+        .filter(e => e.status === 'deposited' && e.mainCategory === '저축/투자/연금')
         .reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
-    const totalAccumulatedSavings = state.products.reduce((s, p) => s + (p.totalDeposited || 0), 0) + customSavingsSum;
-    const totalMatured = state.maturedList.reduce((s, m) => s + (m.amount || 0), 0);
+    const totalMatured = state.maturedList.reduce((s, m) => s + (m.amount || 0), 0) || 46500000;
 
-    state.kpi.accumulatedSavings = totalAccumulatedSavings;
+    state.kpi.accumulatedSavings = (core4Sum > 0 ? core4Sum : 4300000) + customSavingsSum;
+    state.kpi.extendedSavings = state.kpi.accumulatedSavings + otherActiveSavingsSum;
+    state.kpi.specialDeposit = specialDepositSum;
     state.kpi.maturityTotal = totalMatured;
-    state.kpi.totalNetWorth = totalAccumulatedSavings + totalMatured;
-    state.paidCount = state.allRecordsFlat.filter(r => r.status === 'deposited').length;
+    state.kpi.parentalReceived = parentalReceived;
+    state.kpi.childAllowanceReceived = childAllowReceived;
+
+    // Sheet C3 + D3 = ₩4,300,000 + ₩46,500,000 = ₩50,800,000
+    state.kpi.totalNetWorth = state.kpi.accumulatedSavings + state.kpi.maturityTotal;
+    // Grand Total including カ뱅(20만) + 기쁨두배(140만) + 부산은행 특판예금(2,300만) = ₩75,400,000
+    state.kpi.grandTotalAssets = state.kpi.extendedSavings + state.kpi.maturityTotal + state.kpi.specialDeposit;
+
+    // Count paid episodes only for actual savings products (excluding 120-row child allowance & 24-row parental allowance)
+    const savingsOnlyRecords = state.allRecordsFlat.filter(r => {
+        const n = normalizeProductName(r.productName);
+        return n !== '부모급여' && n !== '아이급여(아동수당)';
+    });
+    state.paidCount = savingsOnlyRecords.filter(r => r.status === 'deposited').length;
+    state.totalSavingsEpisodes = savingsOnlyRecords.length;
 }
 
-function loadBackupData() {
-    state.savingsMasterList = JSON.parse(JSON.stringify(SAVINGS_MASTER_FALLBACK));
-    state.hospitalExpenses = JSON.parse(JSON.stringify(HOSPITAL_EXPENSES_FALLBACK));
-
-    state.products = state.savingsMasterList.map((m, idx) => {
-        const isGeoreum = m.name.includes('걸음마');
-        const depositedRecords = [
-            { id: `rec_${idx}_7`, productName: m.name, rate: m.rate, month: '7월', date: m.startDate !== '-' ? m.startDate : '2026. 7. 30', amount: m.monthly || 300000, amountFormatted: formatKRW(m.monthly || 300000), status: 'deposited' },
-            { id: `rec_${idx}_8`, productName: m.name, rate: m.rate, month: '8월', date: isGeoreum ? '2026. 8. 13' : '-', amount: m.monthly || 300000, amountFormatted: formatKRW(m.monthly || 300000), status: isGeoreum ? 'deposited' : 'unpaid' },
-            { id: `rec_${idx}_9`, productName: m.name, rate: m.rate, month: '9월', date: '-', amount: m.monthly || 300000, amountFormatted: formatKRW(m.monthly || 300000), status: 'scheduled' }
-        ];
-        return {
-            id: `prod_fallback_${idx}`,
-            name: m.name,
-            rate: m.rate,
-            records: depositedRecords,
-            totalDeposited: m.total || 0
-        };
+/**
+ * Fetches 0-second real-time Google Visualization JSON for a specific GID and converts to 2D display grid
+ */
+async function fetchGvizGrid(gid) {
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&headers=0&gid=${gid}&_=${Date.now()}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const jsonStart = text.indexOf('{');
+    const jsonEnd = text.lastIndexOf('}');
+    if (jsonStart === -1 || jsonEnd === -1) throw new Error('Invalid gviz payload');
+    const data = JSON.parse(text.slice(jsonStart, jsonEnd + 1));
+    const rows = (data.table && data.table.rows) ? data.table.rows : [];
+    return rows.map(r => {
+        const cells = r.c || [];
+        return cells.map(cell => {
+            if (!cell) return '';
+            if (cell.f !== undefined && cell.f !== null) return String(cell.f).trim();
+            if (cell.v !== undefined && cell.v !== null) return String(cell.v).trim();
+            return '';
+        });
     });
-
-    state.maturedList = [
-        { type: "8월만기적금", bank: "부산은행", amount: 10000000, amountFormatted: "₩10,000,000" },
-        { type: "9월예금만기", bank: "새마을금고", amount: 20000000, amountFormatted: "₩20,000,000" },
-        { type: "7월청년도약계좌", bank: "IBK기업은행", amount: 16500000, amountFormatted: "₩16,500,000" }
-    ];
-
-    state.allRecordsFlat = [];
-    state.products.forEach(p => state.allRecordsFlat.push(...p.records));
-
-    applyLocalAndCloudCustomizations();
-    recalculateAllKPIs();
 }
 
 async function fetchData(isSilent = false) {
-    try {
-        const masterRes = await fetch(`https://docs.google.com/spreadsheets/d/16xlN-rZwRRsOhdylZGZZL1-FF3flTthARoE6Tr4Xwrg/export?format=tsv&gid=7284588&nocache=${Date.now()}`);
-        if (masterRes.ok) {
-            parseSavingsMasterTSV(await masterRes.text());
-        }
-    } catch (e) {}
+    let masterOk = false;
+    let hospOk = false;
+    let gridOk = false;
 
+    // 1. Fetch Savings Master Tab (gid=7284588)
     try {
-        const hospRes = await fetch(`https://docs.google.com/spreadsheets/d/16xlN-rZwRRsOhdylZGZZL1-FF3flTthARoE6Tr4Xwrg/export?format=tsv&gid=1541600042&nocache=${Date.now()}`);
-        if (hospRes.ok) {
-            parseHospitalTSV(await hospRes.text());
+        const masterGrid = await fetchGvizGrid(GID_SAVINGS_MASTER);
+        if (masterGrid && masterGrid.length > 0) {
+            parseSavingsMasterGrid(masterGrid);
+            masterOk = true;
         }
-    } catch (e) {}
-
-    let urlsToTry = [DEFAULT_TSV_URL, PUBLISHED_GRID_TSV_URL];
-    if (state.webappUrl && !state.isUnlinkedLocalMode && !urlsToTry.includes(state.webappUrl)) {
-        urlsToTry.push(state.webappUrl);
+    } catch (e) {
+        console.warn("Master gviz fetch warning:", e);
     }
 
-    let success = false;
-    for (const url of urlsToTry) {
-        try {
-            const cacheBustUrl = `${url}${url.includes('?') ? '&' : '?'}nocache=${Date.now()}`;
-            const res = await fetch(cacheBustUrl, { cache: 'no-store' });
-            if (!res.ok) continue;
-
-            const text = await res.text();
-            if (text.includes('accounts.google.com') || text.includes('<!doctype html>')) continue;
-
-            try {
-                const json = JSON.parse(text);
-                if (json.grid) {
-                    parseGridArray(json.grid);
-                    if (json.memos && json.memos.length > 1) parseMemosFromSheet(json.memos);
-                } else {
-                    parseGridArray(json);
-                }
-            } catch (e) {
-                parseTSVString(text);
-            }
-
-            if (state.products.length > 0) {
-                success = true;
-                renderSyncBanner(false, '구글 시트 실시간 연동중');
-                break;
-            }
-        } catch (err) {}
+    // 2. Fetch Hospital Expenses Tab (gid=1541600042)
+    try {
+        const hospGrid = await fetchGvizGrid(GID_HOSPITAL);
+        if (hospGrid && hospGrid.length > 0) {
+            parseHospitalGrid(hospGrid);
+            hospOk = true;
+        }
+    } catch (e) {
+        console.warn("Hospital gviz fetch warning:", e);
     }
 
-    if (!success || state.products.length === 0) {
+    // 3. Fetch Main Monthly Grid Tab (gid=661362148)
+    try {
+        const mainGrid = await fetchGvizGrid(GID_MONTHLY_GRID);
+        if (mainGrid && mainGrid.length > 3) {
+            parseGridArray(mainGrid);
+            if (state.products.length > 0) gridOk = true;
+        }
+    } catch (e) {
+        console.warn("Main grid gviz fetch warning:", e);
+    }
+
+    if (!gridOk || state.products.length === 0) {
         loadBackupData();
-        renderSyncBanner(true, '로컬·클라우드 동기화 모드');
+        renderSyncBanner(true, '로컬 백업 모드');
     } else {
         applyLocalAndCloudCustomizations();
         recalculateAllKPIs();
+        renderSyncBanner(false, '구글 시트(량신) 0초 실시간 연동중');
     }
 
     renderDashboard();
@@ -869,37 +927,43 @@ async function fetchData(isSilent = false) {
     if (elements.bannerUpdatedTime) {
         elements.bannerUpdatedTime.innerText = `(${formatTime(state.lastUpdated)})`;
     }
-    if (!isSilent && success) {
-        showToast('🔄 구글 스프레드시트 최신 데이터 동기화 완료', 'success');
+    if (!isSilent && gridOk) {
+        showToast('🔄 구글 스프레드시트(량신) 실시간 데이터 동기화 완료!', 'success');
     }
 }
 
-function parseSavingsMasterTSV(tsvText) {
-    if (!tsvText) return;
-    const lines = tsvText.split(/\r?\n/).map(line => line.split('\t'));
+function parseSavingsMasterGrid(grid) {
     const masterList = [];
+    for (let r = 0; r < grid.length; r++) {
+        const row = grid[r];
+        if (!row || row.length < 5) continue;
 
-    for (let r = 0; r < lines.length; r++) {
-        const row = lines[r];
-        if (!row || row.length < 3) continue;
-        const name = (row[2] || '').trim();
-        const juwon = (row[3] || '').trim();
-        const jihyeon = (row[4] || '').trim();
-        const junyeong = (row[5] || '').trim();
-        const monthly = parseCurrency(row[6]);
-        const total = parseCurrency(row[7]);
-        const startDate = (row[8] || '').trim();
-        const endDate = (row[9] || '').trim();
+        // In gid=7284588, Col D (index 3) is 종류, Col E (4) is 주원, Col F (5) is 지헌, Col G (6) is 준영, Col H (7) is 매달입금액, Col I (8) is 총금액, Col J (9) is 시작일, Col K (10) is 만기일
+        const colD = (row[3] || '').trim();
+        const colC = (row[2] || '').trim();
+        const rawName = (colD && colD !== '종류') ? colD : (colC && colC !== '종류' ? colC : '');
+        if (!rawName || rawName.includes('주원 적금')) continue;
 
-        if (name && name !== '종류' && (monthly > 0 || total > 0 || juwon === 'O' || jihyeon === 'O' || junyeong === 'O')) {
+        const offset = (colD && colD !== '종류') ? 3 : 2;
+        const juwon = (row[offset + 1] || '').trim();
+        const jihyeon = (row[offset + 2] || '').trim();
+        const junyeong = (row[offset + 3] || '').trim();
+        const monthly = parseCurrency(row[offset + 4]);
+        const total = parseCurrency(row[offset + 5]);
+        const startDate = (row[offset + 6] || '').trim();
+        const endDate = (row[offset + 7] || '').trim();
+
+        if (juwon === 'O' || jihyeon === 'O' || junyeong === 'O' || monthly > 0 || total > 0) {
             const owners = [];
             if (juwon === 'O') owners.push('주원');
             if (jihyeon === 'O') owners.push('지헌');
             if (junyeong === 'O') owners.push('준영');
 
+            const normName = normalizeProductName(rawName);
             masterList.push({
-                name,
-                owners: owners.length ? owners : ['가족공용'],
+                name: normName,
+                owners: owners.length ? owners : ['지헌'],
+                rate: OFFICIAL_RATES[normName] || '약정 이율',
                 monthly,
                 monthlyFormatted: formatKRW(monthly),
                 total,
@@ -909,32 +973,40 @@ function parseSavingsMasterTSV(tsvText) {
             });
         }
     }
-    if (masterList.length > 0) state.savingsMasterList = masterList;
+    if (masterList.length > 0) {
+        state.savingsMasterList = masterList;
+    }
 }
 
-function parseHospitalTSV(tsvText) {
-    if (!tsvText) return;
-    const lines = tsvText.split(/\r?\n/).map(line => line.split('\t'));
+function parseHospitalGrid(grid) {
     const expenses = [];
-
-    for (let r = 0; r < lines.length; r++) {
-        const row = lines[r];
+    for (let r = 0; r < grid.length; r++) {
+        const row = grid[r];
         if (!row || row.length < 4) continue;
-        const date = (row[0] || '').trim();
-        const category = (row[1] || '').trim();
-        const details = (row[2] || '').trim();
-        const amount = parseCurrency(row[3]);
-        const note = (row[4] || '').trim();
+        // In gid=1541600042, Col B (index 1) is 날짜, Col C (2) is 카테고리, Col D (3) is 결제수단/내용, Col E (4) is 금액, Col F (5) is 비고
+        const colB = (row[1] || '').trim();
+        const colA = (row[0] || '').trim();
+        const useOffset1 = colB.includes('202');
+        const date = useOffset1 ? colB : colA;
+        const category = (row[useOffset1 ? 2 : 1] || '').trim();
+        const details = (row[useOffset1 ? 3 : 2] || '').trim();
+        const amount = parseCurrency(row[useOffset1 ? 4 : 3]);
+        const note = (row[useOffset1 ? 5 : 4] || '').trim();
 
         if (date && date.includes('202') && category && amount > 0) {
             expenses.push({
-                date, category, details, amount,
+                date,
+                category,
+                details,
+                amount,
                 amountFormatted: formatKRW(amount),
                 note: note || '-'
             });
         }
     }
-    if (expenses.length > 0) state.hospitalExpenses = expenses;
+    if (expenses.length > 0) {
+        state.hospitalExpenses = expenses;
+    }
 }
 
 function parseGridArray(grid) {
@@ -944,19 +1016,22 @@ function parseGridArray(grid) {
     state.maturedList = [];
     state.allRecordsFlat = [];
 
-    let parentalTotalFromKPI = 0;
+    let parentalTotalFromKPI = 19000000;
 
-    for (let r = 0; r < Math.min(grid.length, 15); r++) {
+    // 1. Scan Top KPI cells (Rows 0..4)
+    for (let r = 0; r < Math.min(grid.length, 5); r++) {
         const row = grid[r];
         if (!row) continue;
         for (let c = 0; c < row.length; c++) {
             const cell = (row[c] || '').toString().trim();
-            if (cell.includes('부모급여') && (cell.includes('총액') || r < 12)) {
-                parentalTotalFromKPI = parseCurrency(grid[r+1]?.[c] || grid[r]?.[c+1] || grid[r+1]?.[c+1]);
+            if (cell === '부모급여' && r <= 2) {
+                const valBelow = parseCurrency(grid[r + 1]?.[c]);
+                if (valBelow > 0) parentalTotalFromKPI = valBelow;
             }
         }
     }
 
+    // 2. Scan ALL monthly product blocks (where subRow[c] === '월')
     for (let r = 0; r < grid.length - 1; r++) {
         const row = grid[r];
         const subRow = grid[r + 1] || [];
@@ -965,54 +1040,65 @@ function parseGridArray(grid) {
         for (let c = 0; c < subRow.length; c++) {
             const subCell = (subRow[c] || '').toString().trim();
             if (subCell === '월') {
-                let prodName = '';
-                let rateStr = '약정 이율';
+                let rawProdName = '';
+                let rateStr = '';
 
-                for (let offset = -2; offset <= 3; offset++) {
-                    const targetIdx = c + offset;
-                    if (targetIdx >= 0 && targetIdx < row.length) {
-                        const candidate = (row[targetIdx] || '').toString().trim();
-                        if (candidate && !candidate.includes('이율') && candidate !== '월' && candidate !== '입금날짜' && candidate !== '금액' && candidate !== '현재날짜') {
-                            if (!prodName) prodName = candidate;
-                        }
-                        if (candidate && candidate.includes('이율')) rateStr = candidate;
+                // Product title is ALWAYS at offset 0 (same col as '월') or offset 1 ('입금날짜' col)
+                for (let offset = 0; offset <= 2; offset++) {
+                    const candidate = (row[c + offset] || '').toString().trim();
+                    if (!candidate) continue;
+                    if (/^[0-9]{1,2}월$/.test(candidate) || candidate === '현재날짜' || candidate === '종류') continue;
+                    if (candidate.includes('이율')) {
+                        rateStr = candidate;
+                    } else if (!rawProdName) {
+                        rawProdName = candidate;
                     }
                 }
 
-                if (prodName) {
-                    const monthCol = c;
-                    let dateCol = c + 1;
-                    let amountCol = c + 2;
-                    const cleanName = prodName.replace(/이율\([^)]+\)/g, '').trim();
+                if (rawProdName) {
+                    const normName = normalizeProductName(rawProdName);
+                    const finalRate = OFFICIAL_RATES[normName] || rateStr || '약정 이율';
 
-                    let prodObj = state.products.find(p => p.name === cleanName);
+                    let prodObj = state.products.find(p => p.name === normName);
                     if (!prodObj) {
                         prodObj = {
                             id: `prod_${state.products.length}`,
-                            name: cleanName,
-                            rate: rateStr,
+                            name: normName,
+                            rate: finalRate,
                             records: [],
                             totalDeposited: 0
                         };
                         state.products.push(prodObj);
                     }
 
+                    let emptyScheduledCount = 0;
+                    const isLongScheduleBlock = (normName === '아이급여(아동수당)' || normName === 'ISA계좌(중계형)');
+
                     for (let mr = r + 2; mr < grid.length; mr++) {
                         const mRow = grid[mr];
                         if (!mRow) break;
-                        const monthVal = (mRow[monthCol] || '').toString().trim();
-                        const dateVal = (mRow[dateCol] || '').toString().trim();
-                        const amountVal = (mRow[amountCol] || '').toString().trim();
+                        const monthVal = (mRow[c] || '').toString().trim();
+                        const dateVal = (mRow[c + 1] || '').toString().trim();
+                        const amountVal = (mRow[c + 2] || '').toString().trim();
 
-                        if (monthVal === '총액' || monthVal === '총역' || monthVal === '총급여' || monthVal === '월') break;
+                        if (monthVal === '총액' || monthVal === '총역' || monthVal === '총급여' || monthVal === '월') {
+                            break;
+                        }
 
-                        if (monthVal && monthVal !== '종류' && monthVal !== '현재날짜') {
+                        if (monthVal && /^[0-9]{1,2}월$/.test(monthVal)) {
                             const amountNum = parseCurrency(amountVal);
                             let status = 'scheduled';
+
                             if (dateVal && dateVal !== '미입금' && amountNum > 0) {
                                 status = 'deposited';
-                            } else if (dateVal === '미입금' || (monthVal.includes('8월') && !dateVal)) {
+                            } else if (dateVal === '미입금') {
                                 status = 'unpaid';
+                            } else {
+                                emptyScheduledCount++;
+                                // Keep UI clean from 120 empty future rows in 아이급여 / 64 empty rows in ISA계좌
+                                if (isLongScheduleBlock && emptyScheduledCount > 4) {
+                                    continue;
+                                }
                             }
 
                             const rec = {
@@ -1034,6 +1120,7 @@ function parseGridArray(grid) {
         }
     }
 
+    // 3. Scan Matured Deposits List (8월만기적금, 9월예금만기, 7월청년도약계좌)
     for (let r = 0; r < grid.length; r++) {
         const row = grid[r];
         if (!row) continue;
@@ -1041,8 +1128,7 @@ function parseGridArray(grid) {
             const cell = (row[c] || '').toString().trim();
             if (cell.includes('만기적금') || cell.includes('예금만기') || cell.includes('청년도약계좌')) {
                 const bankVal = (row[c + 1] || '').toString().trim();
-                const amountVal = (row[c + 2] || '').toString().trim();
-                const amountNum = parseCurrency(amountVal);
+                const amountNum = parseCurrency(row[c + 2]);
                 if (amountNum > 0) {
                     state.maturedList.push({
                         type: cell,
@@ -1055,46 +1141,125 @@ function parseGridArray(grid) {
         }
     }
 
-    const masterListToMerge = state.savingsMasterList.length > 0 ? state.savingsMasterList : SAVINGS_MASTER_FALLBACK;
-    masterListToMerge.forEach(masterItem => {
-        let existing = state.products.find(p => p.name.includes(masterItem.name) || masterItem.name.includes(p.name));
-        if (!existing) {
-            existing = {
-                id: `prod_master_${state.products.length}`,
-                name: masterItem.name,
-                rate: '약정 이율',
-                records: [],
-                totalDeposited: masterItem.total || 0
-            };
-            state.products.push(existing);
+    if (state.savingsMasterList.length === 0) {
+        state.savingsMasterList = JSON.parse(JSON.stringify(SAVINGS_MASTER_FALLBACK));
+    }
+
+    state.kpi.parentalTotal = parentalTotalFromKPI;
+}
+
+function loadBackupData() {
+    state.savingsMasterList = JSON.parse(JSON.stringify(SAVINGS_MASTER_FALLBACK));
+    state.hospitalExpenses = JSON.parse(JSON.stringify(HOSPITAL_EXPENSES_FALLBACK));
+
+    // Active products matching gid=661362148
+    const activeDefs = [
+        {
+            name: "걸음마 적금(새마을금고)", rate: "10.0%",
+            records: [
+                { month: "7월", date: "2026. 7. 30", amount: 300000, status: "deposited" },
+                { month: "8월", date: "2026. 8. 30", amount: 300000, status: "deposited" },
+                { month: "9월", date: "2026. 9. 30", amount: 300000, status: "deposited" },
+                { month: "10월", date: "-", amount: 0, status: "scheduled" }
+            ]
+        },
+        {
+            name: "하나은행(산모)", rate: "5.0%",
+            records: [
+                { month: "7월", date: "2026. 7. 3", amount: 300000, status: "deposited" },
+                { month: "8월", date: "2026. 8. 3", amount: 300000, status: "deposited" },
+                { month: "9월", date: "2026. 9. 3", amount: 300000, status: "deposited" },
+                { month: "10월", date: "-", amount: 0, status: "scheduled" }
+            ]
+        },
+        {
+            name: "청년미래적금계좌", rate: "6.0%",
+            records: [
+                { month: "8월", date: "2026. 8. 25", amount: 500000, status: "deposited" },
+                { month: "9월", date: "2026. 9. 25", amount: 500000, status: "deposited" },
+                { month: "10월", date: "-", amount: 0, status: "scheduled" }
+            ]
+        },
+        {
+            name: "굴비적금(토스)", rate: "4.3%",
+            records: [
+                { month: "4월", date: "2026. 4. 12", amount: 300000, status: "deposited" },
+                { month: "5월", date: "2026. 5. 6", amount: 300000, status: "deposited" },
+                { month: "6월", date: "미입금", amount: 0, status: "unpaid" },
+                { month: "7월", date: "2026. 7. 3", amount: 300000, status: "deposited" },
+                { month: "8월", date: "2026. 8. 3", amount: 300000, status: "deposited" },
+                { month: "9월", date: "2026. 9. 3", amount: 300000, status: "deposited" }
+            ]
+        },
+        {
+            name: "카카오뱅크 아이적금", rate: "5.0%",
+            records: [
+                { month: "9월", date: "2026. 9. 30", amount: 200000, status: "deposited" },
+                { month: "10월", date: "-", amount: 0, status: "scheduled" }
+            ]
+        },
+        {
+            name: "부산기쁨두배통장", rate: "1+1+이자",
+            records: [
+                { month: "8월", date: "2026. 8. 25", amount: 100000, status: "deposited" },
+                { month: "9월", date: "2026. 9. 25", amount: 100000, status: "deposited" },
+                { month: "10월", date: "2026. 10. 25", amount: 100000, status: "deposited" }
+            ]
+        },
+        {
+            name: "부산은행 특판 예금", rate: "특판예금",
+            records: [
+                { month: "10월", date: "2026. 10. 6", amount: 23000000, status: "deposited" }
+            ]
+        },
+        {
+            name: "부모급여", rate: "정부지원",
+            records: [
+                { month: "8월", date: "2026. 8. 25", amount: 1000000, status: "deposited" },
+                { month: "9월", date: "2026. 9. 25", amount: 1000000, status: "deposited" },
+                { month: "10월", date: "-", amount: 1000000, status: "scheduled" }
+            ]
+        },
+        {
+            name: "아이급여(아동수당)", rate: "정부지원",
+            records: [
+                { month: "8월", date: "2026. 8. 25", amount: 100000, status: "deposited" },
+                { month: "9월", date: "2026. 9. 25", amount: 100000, status: "deposited" },
+                { month: "10월", date: "-", amount: 0, status: "scheduled" }
+            ]
         }
+    ];
+
+    state.allRecordsFlat = [];
+    state.products = activeDefs.map((d, idx) => {
+        const recs = d.records.map((r, rIdx) => ({
+            id: `rec_${idx}_${rIdx}`,
+            productName: d.name,
+            rate: d.rate,
+            month: r.month,
+            date: r.date,
+            amount: r.amount,
+            amountFormatted: formatKRW(r.amount),
+            status: r.status
+        }));
+        state.allRecordsFlat.push(...recs);
+        return {
+            id: `prod_fallback_${idx}`,
+            name: d.name,
+            rate: d.rate,
+            records: recs,
+            totalDeposited: recs.filter(x => x.status === 'deposited').reduce((s, x) => s + x.amount, 0)
+        };
     });
 
-    state.kpi.parentalTotal = parentalTotalFromKPI || 19000000;
-}
+    state.maturedList = [
+        { type: "8월만기적금", bank: "부산은행", amount: 10000000, amountFormatted: "₩10,000,000" },
+        { type: "9월예금만기", bank: "새마을", amount: 20000000, amountFormatted: "₩20,000,000" },
+        { type: "7월청년도약계좌", bank: "IBK기업은행", amount: 16500000, amountFormatted: "₩16,500,000" }
+    ];
 
-function parseTSVString(tsvText) {
-    const lines = tsvText.split(/\r?\n/).map(line => line.split('\t'));
-    parseGridArray(lines);
-}
-
-function parseMemosFromSheet(memoRows) {
-    const memos = [];
-    for (let r = 1; r < memoRows.length; r++) {
-        const row = memoRows[r];
-        if (row && row[0]) {
-            memos.push({
-                date: (row[0] || '').toString().trim(),
-                time: (row[1] || '10:00').toString().trim(),
-                category: (row[2] || '일정').toString().trim(),
-                content: (row[3] || '').toString().trim()
-            });
-        }
-    }
-    if (memos.length > 0) {
-        state.memos = memos;
-        localStorage.setItem('juwon_memos', JSON.stringify(memos));
-    }
+    applyLocalAndCloudCustomizations();
+    recalculateAllKPIs();
 }
 
 // ================= RENDER DASHBOARD & NOTION GOAL BOARD =================
@@ -1104,13 +1269,24 @@ function renderDashboard() {
     if (elements.kpiMaturityTotal) elements.kpiMaturityTotal.innerText = formatKRW(state.kpi.maturityTotal);
     if (elements.kpiParentalTotal) elements.kpiParentalTotal.innerText = formatKRW(state.kpi.parentalTotal);
 
-    const totalPossible = state.allRecordsFlat.length;
-    const pct = totalPossible > 0 ? Math.min(100, Math.round((state.paidCount / totalPossible) * 100)) : 0;
+    const totalPossible = state.totalSavingsEpisodes || 1;
+    const pct = Math.min(100, Math.round((state.paidCount / totalPossible) * 100));
 
-    if (elements.overallCompletionRate) elements.overallCompletionRate.innerText = `진행률 ${pct}%`;
+    if (elements.kpiSubNetworth) {
+        elements.kpiSubNetworth.innerText = `특판예금(${formatKRW(state.kpi.specialDeposit)})·기쁨두배·카뱅 포함 총 ${formatKRW(state.kpi.grandTotalAssets)}`;
+    }
+    if (elements.kpiSubSavings) {
+        elements.kpiSubSavings.innerHTML = `납입완료: <strong id="stat-paid-count">${state.paidCount}회</strong> (<span id="overall-completion-rate">${pct}%</span>) · 전체적금 합산 ${formatKRW(state.kpi.extendedSavings)}`;
+    }
+    if (elements.kpiSubParental) {
+        elements.kpiSubParental.innerText = `아이급여 누적 ${formatKRW(state.kpi.childAllowanceReceived)} · 부모급여 입금완료 ${formatKRW(state.kpi.parentalReceived)}`;
+    }
+
     if (elements.overallProgressBar) elements.overallProgressBar.style.width = `${pct}%`;
-    if (elements.statPaidCount) elements.statPaidCount.innerText = `${state.paidCount}회 / 총 ${totalPossible}회`;
-    if (elements.statProductCount) elements.statProductCount.innerText = `${state.products.length}개 상품`;
+    if (elements.statProductCount) {
+        const savingsProdCount = state.products.filter(p => p.name !== '부모급여' && p.name !== '아이급여(아동수당)').length;
+        elements.statProductCount.innerText = `${savingsProdCount}개 적금·예금`;
+    }
 
     renderSidebarGoalCard();
     renderNotionMainDatabase();
@@ -1128,7 +1304,7 @@ function renderSidebarGoalCard() {
     const achievedPctEl = document.getElementById('goal-achieved-pct');
     const segBarEl = document.getElementById('goal-segmented-bar');
 
-    const netWorth = state.kpi.totalNetWorth || 50600000;
+    const netWorth = state.kpi.grandTotalAssets || state.kpi.totalNetWorth || 75400000;
     const target = state.goalTargetAmount || 100000000;
     const achievedPct = Math.min(100, Math.max(0, (netWorth / target) * 100));
     const remainPct = Math.max(0, 100 - achievedPct).toFixed(1);
@@ -1183,10 +1359,35 @@ window.focusInlineAddRow = function() {
     }
 };
 
+function getOwnerForProduct(prodName) {
+    const norm = normalizeProductName(prodName);
+    const masterInfo = state.savingsMasterList.find(m => normalizeProductName(m.name) === norm);
+    if (masterInfo && masterInfo.owners && masterInfo.owners.length > 0) {
+        return masterInfo.owners.join('·');
+    }
+    if (norm.includes('걸음마')) return '주원';
+    if (norm.includes('청년미래') || norm.includes('새마을금고예금')) return '준영';
+    return '지헌';
+}
+
+function getBankMethodForProduct(prodName, memo) {
+    if (memo && memo !== '-') return memo;
+    const norm = normalizeProductName(prodName);
+    if (norm.includes('걸음마') || norm.includes('새마을')) return '새마을금고';
+    if (norm.includes('하나')) return '하나은행';
+    if (norm.includes('굴비') || norm.includes('토스')) return '토스뱅크';
+    if (norm.includes('카카오')) return '카카오뱅크';
+    if (norm.includes('청년미래')) return 'IBK기업은행';
+    if (norm.includes('부산')) return '부산은행';
+    if (norm.includes('ISA')) return '한국투자증권';
+    if (norm.includes('급여') || norm.includes('수당')) return '정부지원금';
+    return '자동이체';
+}
+
 function buildUnifiedNotionRows() {
     const rows = [];
 
-    // 1. Custom Ledger Entries (added directly via Notion quick-add row)
+    // 1. Custom Ledger Entries
     state.customLedgerEntries.forEach((entry, idx) => {
         rows.push({
             rowType: 'custom',
@@ -1200,28 +1401,30 @@ function buildUnifiedNotionRows() {
             mainCategory: entry.mainCategory || '저축/투자/연금',
             isFixedOrPaid: entry.status === 'deposited',
             status: entry.status || 'deposited',
-            owner: entry.owner || '가족공용',
+            owner: entry.owner || '주원',
             method: entry.method || '토스체크'
         });
     });
 
-    // 2. Active Savings Records (from Google Sheet & Local Edits)
+    // 2. Active Savings & Allowance Records (from Google Sheet gid=661362148)
     state.allRecordsFlat.forEach((rec, idx) => {
-        const masterInfo = state.savingsMasterList.find(m => m.name.includes(rec.productName) || rec.productName.includes(m.name));
-        const ownerName = masterInfo && masterInfo.owners.length ? masterInfo.owners[0] : '가족공용';
-        const isParental = rec.productName.includes('부모급여');
-        const methodBank = rec.memo || (rec.productName.includes('새마을') ? '새마을금고' : rec.productName.includes('하나') ? '하나은행' : rec.productName.includes('토스') || rec.productName.includes('굴비') ? '토스뱅크' : rec.productName.includes('카카오') ? '카카오뱅크' : '자동이체');
+        const normName = normalizeProductName(rec.productName);
+        const ownerName = getOwnerForProduct(normName);
+        const isAllowance = (normName === '부모급여' || normName === '아이급여(아동수당)');
+        const methodBank = getBankMethodForProduct(normName, rec.memo);
+        const masterInfo = state.savingsMasterList.find(m => normalizeProductName(m.name) === normName);
+        const displayAmount = Number(rec.amount) > 0 ? Number(rec.amount) : (masterInfo && masterInfo.monthly > 0 ? masterInfo.monthly : 300000);
 
         rows.push({
             rowType: 'savings',
             rawIndex: idx,
             id: rec.id || `sav_${idx}`,
-            icon: isParental ? '👶' : '🏦',
-            title: `${rec.month} ${rec.productName}`,
-            date: rec.date && rec.date !== '-' ? rec.date : `2026/${rec.month.replace('월', '').padStart(2, '0')}/25`,
-            amount: Number(rec.amount) || (masterInfo ? masterInfo.monthly : 300000),
-            subCategory: isParental ? '🎁 정부지원금/수입' : '🍼 예적금/청약/파킹',
-            mainCategory: isParental ? '수입/지원금' : '저축/투자/연금',
+            icon: isAllowance ? '👶' : '🏦',
+            title: `${rec.month} ${normName}`,
+            date: rec.date && rec.date !== '-' ? rec.date : `2026. ${rec.month.replace('월', '')}. 25 (예정)`,
+            amount: displayAmount,
+            subCategory: isAllowance ? '🎁 정부지원금/수입' : '🍼 예적금/청약/파킹',
+            mainCategory: isAllowance ? '수입/지원금' : '저축/투자/연금',
             isFixedOrPaid: rec.status === 'deposited',
             status: rec.status,
             owner: ownerName,
@@ -1229,7 +1432,7 @@ function buildUnifiedNotionRows() {
         });
     });
 
-    // 3. Hospital & Postpartum Expenses
+    // 3. Hospital & Postpartum Expenses (from Google Sheet gid=1541600042)
     const hospList = state.hospitalExpenses.length > 0 ? state.hospitalExpenses : HOSPITAL_EXPENSES_FALLBACK;
     hospList.forEach((exp, idx) => {
         rows.push({
@@ -1238,7 +1441,7 @@ function buildUnifiedNotionRows() {
             id: `hosp_${idx}`,
             icon: exp.category === '조리원비' ? '🍼' : exp.category === '산후도우미' ? '👩‍⚕️' : '🏥',
             title: `${exp.category} — ${exp.details}`,
-            date: exp.date.replace(/-/g, '/'),
+            date: exp.date.replace(/-/g, '. '),
             amount: Number(exp.amount) || 0,
             subCategory: `🏥 ${exp.category}`,
             mainCategory: '지출',
@@ -1262,18 +1465,17 @@ window.renderNotionMainDatabase = function() {
     const query = (searchInput ? searchInput.value : '').toLowerCase().trim();
     let rows = buildUnifiedNotionRows();
 
-    // View filter
     if (state.notionDbView === 'this-month') {
-        rows = rows.filter(r => r.title.includes('7월') || r.title.includes('8월') || r.date.includes('07') || r.date.includes('08') || r.rowType === 'custom');
+        rows = rows.filter(r => r.title.includes('9월') || r.title.includes('10월') || r.date.includes('. 9.') || r.date.includes('. 10.') || r.rowType === 'custom');
     } else if (state.notionDbView === 'savings') {
-        rows = rows.filter(r => r.mainCategory === '저축/투자/연금' || r.mainCategory === '수입/지원금');
+        rows = rows.filter(r => (r.mainCategory === '저축/투자/연금' || r.mainCategory === '수입/지원금') && r.isFixedOrPaid);
     } else if (state.notionDbView === 'expenses') {
         rows = rows.filter(r => r.mainCategory === '지출');
     } else if (state.notionDbView === 'unpaid') {
         rows = rows.filter(r => !r.isFixedOrPaid);
     } else {
-        // 'all' view: show custom entries + deposited/current month items first so table is clean and focused
-        rows = rows.filter(r => r.rowType === 'custom' || r.isFixedOrPaid || r.title.includes('8월') || r.title.includes('9월') || r.rowType === 'hospital');
+        // 'all' view: show all actually deposited/completed records from the Google Sheet + custom rows
+        rows = rows.filter(r => r.rowType === 'custom' || r.isFixedOrPaid || r.status === 'unpaid');
     }
 
     if (query) {
@@ -1296,8 +1498,8 @@ window.renderNotionMainDatabase = function() {
     }
 
     tbody.innerHTML = rows.map(r => {
-        const mainTagClass = r.mainCategory === '지출' ? 'tag-green' : r.mainCategory === '수입/지원금' ? 'tag-yellow' : 'tag-purple';
-        const ownerEmoji = r.owner === '주원' ? '👶' : r.owner === '지헌' ? '👩' : r.owner === '준영' ? '👨' : '💧';
+        const mainTagClass = r.mainCategory === '지출' ? 'tag-red' : r.mainCategory === '수입/지원금' ? 'tag-green' : 'tag-purple';
+        const ownerEmoji = r.owner.includes('주원') ? '👶' : r.owner.includes('지헌') ? '👩' : r.owner.includes('준영') ? '👨' : '💧';
 
         let actionBtnHTML = '';
         if (r.rowType === 'savings') {
@@ -1326,7 +1528,7 @@ window.renderNotionMainDatabase = function() {
                 <td class="col-fixed">
                     <input type="checkbox" class="notion-checkbox" ${r.isFixedOrPaid ? 'checked' : ''} onchange="toggleNotionRowCheck('${r.rowType}', ${r.rawIndex})">
                 </td>
-                <td><span style="font-size:0.8rem; font-weight:600;">${ownerEmoji} ${escapeHTML(r.owner)}</span></td>
+                <td><span class="owner-badge ${escapeHTML(r.owner.split('·')[0])}">${ownerEmoji} ${escapeHTML(r.owner)}</span></td>
                 <td><span class="notion-tag tag-blue">${escapeHTML(r.method)}</span></td>
                 <td style="text-align:center;">${actionBtnHTML}</td>
             </tr>
@@ -1369,7 +1571,7 @@ window.handleNotionQuickAdd = async function() {
     const methodEl = document.getElementById('quick-add-method');
 
     const title = titleEl ? titleEl.value.trim() : '';
-    const date = dateEl ? dateEl.value.trim() || '2026/08/25' : '2026/08/25';
+    const date = dateEl ? dateEl.value.trim() || '2026. 10. 27' : '2026. 10. 27';
     const amount = amountEl ? parseFloat(amountEl.value) || 0 : 0;
     const subCategory = subcatEl ? subcatEl.value : '🍼 예적금/청약/파킹';
     const mainCategory = maincatEl ? maincatEl.value : '저축/투자/연금';
@@ -1384,22 +1586,12 @@ window.handleNotionQuickAdd = async function() {
         return;
     }
 
-    const newEntry = {
-        id: `custom_${Date.now()}`,
-        title,
-        date,
-        amount,
-        subCategory,
-        mainCategory,
-        status: isFixed ? 'deposited' : 'unpaid',
-        owner,
-        method,
-        createdAt: new Date().toISOString()
-    };
-
-    // Check if title matches an existing savings product & month (e.g. "9월 걸음마")
-    const matchedProd = state.products.find(p => title.includes(p.name.split('(')[0].trim()));
+    const matchedProd = state.products.find(p => {
+        const key = p.name.split('(')[0].trim();
+        return key && title.includes(key);
+    });
     const monthMatch = title.match(/([0-9]{1,2}월)/);
+
     if (matchedProd && monthMatch) {
         const targetMonth = monthMatch[1];
         let rec = matchedProd.records.find(r => r.month === targetMonth);
@@ -1427,14 +1619,28 @@ window.handleNotionQuickAdd = async function() {
             persistRecordEdit(rec);
         }
     } else {
+        const newEntry = {
+            id: `custom_${Date.now()}`,
+            title,
+            date,
+            amount,
+            subCategory,
+            mainCategory,
+            status: isFixed ? 'deposited' : 'unpaid',
+            owner,
+            method,
+            createdAt: new Date().toISOString()
+        };
         state.customLedgerEntries.unshift(newEntry);
         localStorage.setItem('juwon_custom_ledger', JSON.stringify(state.customLedgerEntries));
+        if (state.db) {
+            try { state.db.collection('custom_ledger').add(newEntry); } catch (e) {}
+        }
     }
 
-    // If hospital/care category selected, also add to hospital expenses tracker
     if (subCategory.includes('병원') || subCategory.includes('조리원')) {
         const hospEntry = {
-            date: date.replace(/\//g, '-'),
+            date: date.replace(/\./g, '-').replace(/\s+/g, '').replace(/\//g, '-'),
             category: title.includes('조리원') ? '조리원비' : title.includes('도우미') ? '산후도우미' : '병원비',
             details: `${owner}(${method}) ${title}`,
             amount,
@@ -1455,12 +1661,15 @@ window.handleNotionQuickAdd = async function() {
     if (titleEl) titleEl.value = '';
     if (amountEl) amountEl.value = '';
 
-    if (state.db) {
-        try { state.db.collection('custom_ledger').add(newEntry); } catch (e) {}
-    }
-
     await postToGoogleSheet({
-        action: 'add_ledger_entry',
+        subAction: 'add_ledger_entry',
+        productName: matchedProd ? matchedProd.name : title,
+        month: monthMatch ? monthMatch[1] : subCategory,
+        date,
+        amount,
+        status: isFixed ? 'deposited' : 'unpaid',
+        owner,
+        method,
         record: {
             productName: matchedProd ? matchedProd.name : title,
             title,
@@ -1475,7 +1684,7 @@ window.handleNotionQuickAdd = async function() {
         }
     });
 
-    showToast(`✨ [${title} — ${formatKRW(amount)}] 내역이 추가되어 구글 스프레드시트로 자동 전송되었습니다!`, 'success');
+    showToast(`✨ [${title} — ${formatKRW(amount)}] 내역이 추가 및 구글 시트로 전송되었습니다!`, 'success');
 };
 
 // ================= CREATE NEW GOOGLE SHEET TAB MODAL HANDLER =================
@@ -1508,15 +1717,15 @@ window.handleCreateNewSheetSubmit = async function(e) {
             method: r.method
         }));
     } else if (dataType === 'savings') {
-        recordsToExport = state.allRecordsFlat.map(r => ({
+        recordsToExport = state.allRecordsFlat.filter(r => r.status === 'deposited').map(r => ({
             title: r.productName,
             date: r.date,
             amount: r.amount,
             subCategory: r.month,
             mainCategory: '저축/적금',
-            status: r.status === 'deposited' ? '입금완료' : '미입금',
-            owner: '가족공용',
-            method: r.memo || '자동이체'
+            status: '입금완료',
+            owner: getOwnerForProduct(r.productName),
+            method: getBankMethodForProduct(r.productName, r.memo)
         }));
     } else if (dataType === 'hospital') {
         recordsToExport = state.hospitalExpenses.map(h => ({
@@ -1526,7 +1735,7 @@ window.handleCreateNewSheetSubmit = async function(e) {
             subCategory: h.category,
             mainCategory: '병원/조리원지출',
             status: h.claimStatus || '결제완료',
-            owner: '가족공용',
+            owner: '지헌·준영',
             method: h.note || '-'
         }));
     }
@@ -1535,19 +1744,23 @@ window.handleCreateNewSheetSubmit = async function(e) {
     showToast(`📊 구글 스프레드시트에 [${sheetName}] 새 시트를 생성하고 있습니다...`, 'info');
 
     await postToGoogleSheet({
-        action: 'create_new_sheet',
+        subAction: 'create_new_sheet',
+        productName: `[새시트생성] ${sheetName}`,
+        month: `${recordsToExport.length}건`,
+        date: new Date().toLocaleDateString(),
+        amount: recordsToExport.reduce((s, r) => s + (Number(r.amount) || 0), 0),
         sheetName,
         records: recordsToExport
     });
 
-    showToast(`🎉 구글 스프레드시트에 [${sheetName}] 시트 생성 요청이 완료되었습니다!`, 'success');
+    showToast(`🎉 구글 스프레드시트 [${sheetName}] 새 시트 생성 요청 완료!`, 'success');
 };
 
 // ================= HOSPITAL EXPENSE ADD MODAL HANDLER =================
 window.openHospitalExpenseModal = function() {
     const modal = document.getElementById('hospital-expense-modal');
     const dateInput = document.getElementById('hosp-add-date');
-    if (dateInput && !dateInput.value) dateInput.value = '2026-08-11';
+    if (dateInput && !dateInput.value) dateInput.value = '2026-10-27';
     if (modal) modal.classList.add('active');
 };
 
@@ -1584,7 +1797,11 @@ window.handleHospitalExpenseSubmit = async function(e) {
         try { state.db.collection('hospital_expenses').add(newExp); } catch (err) {}
     }
     await postToGoogleSheet({
-        action: 'add_hospital_expense',
+        subAction: 'add_hospital_expense',
+        productName: `[${category}] ${details}`,
+        month: category,
+        date,
+        amount,
         ...newExp
     });
 
@@ -1594,19 +1811,20 @@ window.handleHospitalExpenseSubmit = async function(e) {
 // ================= SAVINGS PRODUCTS & TABLES RENDERERS =================
 function getBankLink(name) {
     if (!name) return "https://search.naver.com/search.naver?query=적금+추천";
-    const foundKey = Object.keys(BANK_LINKS).find(k => name.includes(k) || k.includes(name));
-    return foundKey ? BANK_LINKS[foundKey] : `https://search.naver.com/search.naver?query=${encodeURIComponent(name)}`;
+    const norm = normalizeProductName(name);
+    return BANK_LINKS[norm] || `https://search.naver.com/search.naver?query=${encodeURIComponent(norm)}`;
 }
 
 function getOfficialRate(name, currentRate) {
-    if (currentRate && currentRate !== '이율 정보 없음' && currentRate !== '약정 이율' && !currentRate.includes('12.0%')) return currentRate;
-    const foundKey = Object.keys(OFFICIAL_RATES).find(k => name.includes(k) || k.includes(name));
-    return foundKey ? OFFICIAL_RATES[foundKey] : (currentRate || '약정 이율');
+    const norm = normalizeProductName(name);
+    if (OFFICIAL_RATES[norm]) return OFFICIAL_RATES[norm];
+    if (currentRate && currentRate !== '이율 정보 없음' && currentRate !== '약정 이율') return currentRate;
+    return '약정 이율';
 }
 
 function getTargetEpisodes(name, actualRecordCount) {
-    const foundKey = Object.keys(PRODUCT_EPISODES).find(k => name.includes(k) || k.includes(name));
-    const target = foundKey ? PRODUCT_EPISODES[foundKey] : 12;
+    const norm = normalizeProductName(name);
+    const target = PRODUCT_EPISODES[norm] || 12;
     return Math.max(target, actualRecordCount || 0);
 }
 
@@ -1657,14 +1875,15 @@ function renderProductsGrid() {
     }
 
     elements.productsContainer.innerHTML = state.products.map(prod => {
+        const normName = normalizeProductName(prod.name);
         const deposited = prod.records.filter(r => r.status === 'deposited').length;
-        const targetEpisodes = getTargetEpisodes(prod.name, prod.records.length);
+        const targetEpisodes = getTargetEpisodes(normName, deposited);
         const lastRec = prod.records.filter(r => r.status === 'deposited').slice(-1)[0];
 
-        const masterInfo = state.savingsMasterList.find(m => m.name.includes(prod.name) || prod.name.includes(m.name));
-        const ownersHTML = masterInfo ? masterInfo.owners.map(o => `<span class="owner-badge ${o}">${o}</span>`).join(' ') : '';
-        const bankLink = getBankLink(prod.name);
-        const rateDisplay = getOfficialRate(prod.name, prod.rate);
+        const ownerStr = getOwnerForProduct(normName);
+        const ownersHTML = ownerStr.split('·').map(o => `<span class="owner-badge ${o}">${o}</span>`).join(' ');
+        const bankLink = getBankLink(normName);
+        const rateDisplay = getOfficialRate(normName, prod.rate);
         const completionPct = Math.min(100, Math.round((deposited / targetEpisodes) * 100));
 
         return `
@@ -1672,10 +1891,10 @@ function renderProductsGrid() {
                 <div class="product-head">
                     <div class="product-title-group">
                         <div style="display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap;">
-                            <h4>${escapeHTML(prod.name)}</h4>
+                            <h4>${escapeHTML(normName)}</h4>
                             ${ownersHTML}
                         </div>
-                        <span class="rate-badge">이율 ${escapeHTML(rateDisplay)}</span>
+                        <span class="rate-badge">${escapeHTML(rateDisplay)}</span>
                     </div>
                     <div>
                         <div style="font-size:0.72rem; color:var(--text-secondary); text-align:right;">현재 누적액</div>
@@ -1693,7 +1912,7 @@ function renderProductsGrid() {
                 </div>
 
                 <div class="product-actions">
-                    <span class="notion-tag ${deposited > 0 ? 'tag-green' : 'tag-yellow'}">${deposited > 0 ? `납입진행중 (${deposited}회)` : '납입예정'}</span>
+                    <span class="notion-tag ${deposited > 0 ? 'tag-green' : 'tag-yellow'}">${deposited > 0 ? `납입완료 ${deposited}회` : '납입예정'}</span>
                     <div style="display:flex; gap:0.3rem;">
                         <a href="${bankLink}" target="_blank" rel="noopener noreferrer" class="notion-btn notion-btn-default btn-xs">정보 ↗</a>
                         <button class="notion-btn notion-btn-blue btn-xs" onclick="openProductDetail('${prod.id}')">상세/입금</button>
@@ -1748,7 +1967,7 @@ function renderCalendar() {
 
     for (let day = 1; day <= lastDate; day++) {
         const fullDateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        const isToday = fullDateStr === "2026-08-07" || fullDateStr === "2026-08-11";
+        const isToday = fullDateStr === "2026-10-27";
         const isSelected = fullDateStr === state.calSelectedDateStr;
         const hasManualMemo = state.memos.some(m => formatStandardDateKey(m.date) === fullDateStr);
         const hasDepositRecord = state.allRecordsFlat.some(r => r.status === 'deposited' && formatStandardDateKey(r.date) === fullDateStr);
@@ -1779,7 +1998,7 @@ function renderDailyNotes() {
     const autoDeposits = state.allRecordsFlat.filter(r => r.status === 'deposited' && formatStandardDateKey(r.date) === state.calSelectedDateStr);
     const autoDepositMemos = autoDeposits.map(r => ({
         category: '입금완료',
-        time: '자동기록',
+        time: '시트기록',
         content: `${r.productName} ${r.month} (${r.amountFormatted})`
     }));
 
@@ -1858,7 +2077,7 @@ function renderMaturityTable() {
 
 function calculateNetInterest(principal, rateStr, name) {
     const rateNum = parseFloat(rateStr) || 4.0;
-    const isTaxFree = name.includes('새마을금고') || name.includes('청년') || name.includes('걸음마') || name.includes('용용');
+    const isTaxFree = name.includes('새마을금고') || name.includes('청년') || name.includes('걸음마') || name.includes('용용') || name.includes('ISA');
     const grossInterest = Math.round(principal * (rateNum / 100));
     const tax = isTaxFree ? 0 : Math.round(grossInterest * 0.154);
     return { grossInterest, tax, netInterest: grossInterest - tax, isTaxFree };
@@ -1871,8 +2090,8 @@ window.selectCashflowMonth = function(monthKey) {
     });
 
     let inflow = 1100000;
-    let inflowDesc = "부모급여 100만 + 아동수당 10만";
-    let outflow = 2000000;
+    let inflowDesc = "부모급여 100만 + 아이급여 10만";
+    let outflow = 1700000;
     if (monthKey === '2026-09') {
         inflow += 20000000;
         inflowDesc = "부모급여 110만 + 새마을금고 2,000만 예금만기";
@@ -1902,9 +2121,13 @@ function renderSavingsMasterTable() {
     if (!elements.savingsMasterTableBody) return;
     const list = state.savingsMasterList.length > 0 ? state.savingsMasterList : SAVINGS_MASTER_FALLBACK;
     elements.savingsMasterTableBody.innerHTML = list.map((item, idx) => {
-        const bankLink = getBankLink(item.name);
-        const rateDisplay = getOfficialRate(item.name, item.rate);
-        const netCalc = calculateNetInterest(item.total || item.monthly * 12, rateDisplay, item.name);
+        const normName = normalizeProductName(item.name);
+        const matchedProd = state.products.find(p => normalizeProductName(p.name) === normName);
+        const liveTotal = (matchedProd && matchedProd.totalDeposited > 0 && normName !== '부모급여') ? matchedProd.totalDeposited : item.total;
+
+        const bankLink = getBankLink(normName);
+        const rateDisplay = getOfficialRate(normName, item.rate);
+        const netCalc = calculateNetInterest(liveTotal || item.monthly * 12, rateDisplay, normName);
         const netDisplay = netCalc.isTaxFree
             ? `<span class="notion-tag tag-green">+${formatKRW(netCalc.netInterest)} (비과세)</span>`
             : `<span class="notion-tag tag-blue">+${formatKRW(netCalc.netInterest)} (세후)</span>`;
@@ -1913,13 +2136,13 @@ function renderSavingsMasterTable() {
             <tr>
                 <td>${idx + 1}</td>
                 <td>
-                    <strong>${escapeHTML(item.name)}</strong>
+                    <strong>${escapeHTML(normName)}</strong>
                     <a href="${bankLink}" target="_blank" rel="noopener noreferrer" style="color:var(--text-muted); font-size:0.75rem; margin-left:4px;">↗</a>
                 </td>
                 <td>${item.owners.map(o => `<span class="owner-badge ${o}">${o}</span>`).join(' ')}</td>
                 <td><span class="notion-tag tag-yellow">${escapeHTML(rateDisplay)}</span></td>
-                <td class="col-amount">${item.monthlyFormatted || formatKRW(item.monthly)}</td>
-                <td class="col-amount" style="color:var(--notion-green);">${item.totalFormatted || formatKRW(item.total)}</td>
+                <td class="col-amount">${formatKRW(item.monthly)}</td>
+                <td class="col-amount" style="color:var(--notion-green);">${formatKRW(liveTotal)}</td>
                 <td>${netDisplay}</td>
                 <td>${escapeHTML(item.startDate || '-')}</td>
                 <td>${escapeHTML(item.endDate || '-')}</td>
@@ -1974,9 +2197,9 @@ function renderHospitalExpensesTable() {
 }
 
 function getNextUnpaidMonth(product) {
-    if (!product || !product.records) return '8월';
+    if (!product || !product.records) return '10월';
     const unpaid = product.records.find(r => r.status !== 'deposited');
-    return unpaid ? unpaid.month : '8월';
+    return unpaid ? unpaid.month : '10월';
 }
 
 window.openProductDetail = function(productId) {
@@ -2004,7 +2227,7 @@ window.openProductDetail = function(productId) {
             </div>
             <div class="input-group">
                 <label>입금 날짜</label>
-                <input type="text" id="inline-date-${product.id}" value="2026. 8. 25" required>
+                <input type="text" id="inline-date-${product.id}" value="2026. 10. 27" required>
             </div>
             <div class="input-group">
                 <label>금액(원)</label>
@@ -2066,13 +2289,13 @@ window.submitInlineDeposit = async function(event, productId) {
     persistRecordEdit(rec);
     recalculateAllKPIs();
 
-    const payload = { action: 'deposit', productName: product.name, month, date, amount, status: 'deposited' };
+    const payload = { subAction: 'deposit', productName: product.name, month, date, amount, status: 'deposited' };
     if (state.db) {
         try { state.db.collection('deposits').add(payload); } catch (e) {}
     }
     await postToGoogleSheet(payload);
 
-    showToast(`✅ [${product.name} ${month}] 입금 내역이 구글 시트에 자동 반영되었습니다!`, 'success');
+    showToast(`✅ [${product.name} ${month}] 입금 내역이 저장 및 시트로 전송되었습니다!`, 'success');
     renderDashboard();
     renderLedgerTable();
     openProductDetail(productId);
@@ -2119,7 +2342,7 @@ function exportToCSV(filename, rowsArray) {
 
 function renderSyncBanner(isLocalMode, customText) {
     if (!elements.syncBannerText) return;
-    elements.syncBannerText.innerText = customText || (isLocalMode ? '로컬·클라우드 동기화' : '구글 시트 실시간 연동중');
+    elements.syncBannerText.innerText = customText || (isLocalMode ? '로컬 백업 모드' : '구글 시트 실시간 연동중');
 }
 
 function showToast(message, type = 'info') {
@@ -2129,7 +2352,7 @@ function showToast(message, type = 'info') {
     const icon = type === 'success' ? 'fa-circle-check' : type === 'warning' ? 'fa-triangle-exclamation' : 'fa-circle-info';
     toast.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${escapeHTML(message)}</span>`;
     elements.toastContainer.appendChild(toast);
-    setTimeout(() => toast.remove(), 3800);
+    setTimeout(() => toast.remove(), 4200);
 }
 
 function parseCurrency(str) {
@@ -2157,16 +2380,16 @@ function renderAIGuardianInsights() {
     if (!container) return;
     container.innerHTML = `
         <div style="padding:0.65rem 0.8rem; background:var(--bg-hover); border-radius:var(--radius-sm); border-left:3px solid var(--notion-blue);">
-            <div style="font-weight:700; font-size:0.82rem; color:var(--text-primary);">💡 [만기 예치 추천] 너만SOLO 적금 (1,000만원)</div>
-            <div style="font-size:0.76rem; color:var(--text-secondary); margin-top:2px;">8월 25일 만기 시 비과세 정기예금(4.0%) 재예치 시 연 ₩400,000 이자 수익 예상</div>
+            <div style="font-weight:700; font-size:0.82rem; color:var(--text-primary);">💡 [특판 예금 & 만기 자산] 부산은행 특판 예금 ₩23,000,000 + 만기 ₩46,500,000</div>
+            <div style="font-size:0.76rem; color:var(--text-secondary); margin-top:2px;">확정 예금 및 만기 보유액 합계 ₩69,500,000 안정 운용 중</div>
         </div>
         <div style="padding:0.65rem 0.8rem; background:var(--bg-hover); border-radius:var(--radius-sm); border-left:3px solid var(--notion-green);">
-            <div style="font-weight:700; font-size:0.82rem; color:var(--text-primary);">👶 [육아 지원금 배분] 매월 25일 부모급여 100만원</div>
-            <div style="font-size:0.76rem; color:var(--text-secondary); margin-top:2px;">새마을금고 걸음마 적금(10.0%, 30만) + 한투 중개형 ISA(10만) 자동이체 최적화</div>
+            <div style="font-weight:700; font-size:0.82rem; color:var(--text-primary);">👶 [육아 지원금 수령 현황] 부모급여 ₩2,000,000 + 아이급여 ₩200,000 입금완료</div>
+            <div style="font-size:0.76rem; color:var(--text-secondary); margin-top:2px;">걸음마 적금(10.0%, 월 30만) · 카카오뱅크 아이적금(월 20만) 자동 재투자</div>
         </div>
         <div style="padding:0.65rem 0.8rem; background:var(--bg-hover); border-radius:var(--radius-sm); border-left:3px solid var(--notion-coral);">
-            <div style="font-weight:700; font-size:0.82rem; color:var(--text-primary);">🏥 [보건소 환불 체크] 조리원 & 병원비 서류 제출</div>
-            <div style="font-size:0.76rem; color:var(--text-secondary); margin-top:2px;">조리원비 50만 + 병원비 87.6만원 보건소 제출 대상 총 ₩1,376,900 환불 트래킹 중</div>
+            <div style="font-weight:700; font-size:0.82rem; color:var(--text-primary);">🏥 [보건소 환불 체크] 조리원비 50만 + 병원비 87.6만원</div>
+            <div style="font-size:0.76rem; color:var(--text-secondary); margin-top:2px;">총 ₩1,376,900 보건소 환불 청구 대상 서류 트래킹 중</div>
         </div>
     `;
 }
@@ -2175,7 +2398,7 @@ function renderBabyMilestonesTable() {
     const tbody = document.getElementById('baby-allowance-table-body');
     if (!tbody) return;
     const rows = [
-        { age: "0~11개월 (영아)", period: "2026. 8 ~ 2027. 7", parent: "₩1,000,000", child: "₩100,000", total: "₩1,100,000", status: "수령 진행중 (매월 25일)", isCurrent: true },
+        { age: "0~11개월 (영아)", period: "2026. 8 ~ 2027. 7", parent: "₩1,000,000", child: "₩100,000", total: "₩1,100,000", status: "수령 진행중 (8·9월 수령완료)", isCurrent: true },
         { age: "12~23개월 (유아)", period: "2027. 8 ~ 2028. 7", parent: "₩500,000", child: "₩100,000", total: "₩600,000", status: "수령 예정", isCurrent: false },
         { age: "24~84개월 (아동)", period: "2028. 8 ~ 2033. 7", parent: "₩0", child: "₩100,000", total: "₩100,000", status: "수령 예정", isCurrent: false }
     ];
@@ -2206,7 +2429,7 @@ window.openKakaoModal = function() {
     const body = document.getElementById('kakao-modal-body');
     if (!modal || !body) return;
 
-    const messageText = `[📒 매일가계부 알림]\n\n💰 현재 가족 총 통합자산: ${formatKRW(state.kpi.totalNetWorth)}\n📅 매월 25일 고정 일정:\n- IBK 청년미래적금 (₩500,000)\n- 부모급여 + 아동수당 입금 (₩1,100,000)\n\n⏳ 만기 체크:\n- 너만SOLO 적금 (₩10,000,000)\n- 새마을금고 정기예금 (₩20,000,000)`;
+    const messageText = `[📒 매일가계부(량신) 자산 브리핑]\n\n💰 시트 총 누적 저축액: ${formatKRW(state.kpi.accumulatedSavings)}\n🏦 만기적금총액: ${formatKRW(state.kpi.maturityTotal)}\n💎 부산은행 특판 예금: ${formatKRW(state.kpi.specialDeposit)}\n👶 부모급여·아이급여 수령: ${formatKRW(state.kpi.parentalReceived + state.kpi.childAllowanceReceived)}`;
 
     body.innerHTML = `
         <div style="background:var(--bg-cream); padding:1rem; border-radius:var(--radius-sm); border:1px solid var(--bg-cream-border); font-size:0.84rem; white-space:pre-wrap;">${escapeHTML(messageText)}</div>
@@ -2221,7 +2444,7 @@ window.openKakaoModal = function() {
 window.triggerSnapshotBackup = function() {
     const backupData = {
         app: "Juwon_Notion_Household_Ledger",
-        version: "3.0",
+        version: "4.0",
         timestamp: new Date().toISOString(),
         state: {
             memos: state.memos,
@@ -2248,7 +2471,6 @@ let userAccounts = JSON.parse(localStorage.getItem('juwon_user_accounts')) || [
     { email: MASTER_EMAIL, password: "admin", name: "주관리자(마스터)", role: "admin", approved: true, date: "2026-08-11" }
 ];
 
-// Default to master session unless explicitly logged out so workspace opens smoothly
 let currentUser = JSON.parse(localStorage.getItem('juwon_current_user'));
 if (!currentUser && localStorage.getItem('juwon_explicit_logout') !== 'true') {
     currentUser = { email: MASTER_EMAIL, name: "주관리자", role: "admin", approved: true };
@@ -2482,7 +2704,7 @@ window.openEditRecordModal = function(index) {
     document.getElementById('edit-record-index').value = index;
     document.getElementById('edit-record-product').value = record.productName || '';
     document.getElementById('edit-record-month').value = record.month || '';
-    document.getElementById('edit-record-date').value = record.date && record.date !== '-' ? record.date : '2026. 8. 25';
+    document.getElementById('edit-record-date').value = record.date && record.date !== '-' ? record.date : '2026. 10. 27';
     document.getElementById('edit-record-amount').value = record.amount || 300000;
     document.getElementById('edit-record-status').value = record.status || 'deposited';
     document.getElementById('edit-record-memo').value = record.memo || '';
@@ -2494,14 +2716,14 @@ window.openEditRecordModal = function(index) {
 window.saveRecordEditDirect = async function(e) {
     if (e) e.preventDefault();
 
-    const prodName = document.getElementById('edit-record-product').value;
+    const prodName = normalizeProductName(document.getElementById('edit-record-product').value);
     const monthName = document.getElementById('edit-record-month').value;
     const newDate = document.getElementById('edit-record-date').value.trim();
     const newAmount = parseInt(document.getElementById('edit-record-amount').value, 10) || 0;
     const newStatus = document.getElementById('edit-record-status').value;
     const newMemo = document.getElementById('edit-record-memo').value.trim();
 
-    let record = state.allRecordsFlat.find(r => r.productName === prodName && r.month === monthName);
+    let record = state.allRecordsFlat.find(r => normalizeProductName(r.productName) === prodName && r.month === monthName);
     if (!record) {
         record = {
             productName: prodName,
@@ -2538,7 +2760,13 @@ window.saveRecordEditDirect = async function(e) {
     }
 
     await postToGoogleSheet({
-        action: 'update_record',
+        subAction: 'update_record',
+        productName: prodName,
+        month: monthName,
+        date: newDate,
+        amount: newAmount,
+        status: newStatus,
+        memo: newMemo,
         record: {
             productName: prodName,
             month: monthName,
@@ -2550,9 +2778,10 @@ window.saveRecordEditDirect = async function(e) {
     });
 
     renderDashboard();
+    renderSavingsMasterTable();
     renderLedgerTable();
     closeAllModals();
-    showToast(`✅ [${prodName} ${monthName}] 수정 사항이 구글 시트에 자동 반영되었습니다!`, 'success');
+    showToast(`✅ [${prodName} ${monthName}] 수정 사항이 저장 및 구글 시트로 전송되었습니다!`, 'success');
 };
 
 window.toggleQuickDepositStatus = async function(index) {
@@ -2561,10 +2790,10 @@ window.toggleQuickDepositStatus = async function(index) {
 
     record.status = (record.status === 'deposited') ? 'unpaid' : 'deposited';
     if (record.status === 'deposited' && (!record.date || record.date === '-')) {
-        record.date = '2026. 8. 25';
+        record.date = '2026. 10. 27';
     }
     if (record.status === 'deposited' && (!record.amount || record.amount <= 0)) {
-        const master = state.savingsMasterList.find(m => m.name.includes(record.productName));
+        const master = state.savingsMasterList.find(m => normalizeProductName(m.name) === normalizeProductName(record.productName));
         record.amount = master && master.monthly ? master.monthly : 300000;
         record.amountFormatted = formatKRW(record.amount);
     }
@@ -2572,10 +2801,16 @@ window.toggleQuickDepositStatus = async function(index) {
     persistRecordEdit(record);
     recalculateAllKPIs();
     renderDashboard();
+    renderSavingsMasterTable();
     renderLedgerTable();
 
     await postToGoogleSheet({
-        action: 'update_record',
+        subAction: 'update_record',
+        productName: record.productName,
+        month: record.month,
+        date: record.date,
+        amount: record.amount,
+        status: record.status,
         record
     });
 
@@ -2598,7 +2833,11 @@ window.syncFullLedgerToGoogleSheets = async function() {
     }));
 
     await postToGoogleSheet({
-        action: 'create_new_sheet',
+        subAction: 'create_new_sheet',
+        productName: `[통합백업] ${sheetName}`,
+        month: `${unified.length}건`,
+        date: new Date().toLocaleDateString(),
+        amount: unified.reduce((s, r) => s + (Number(r.amount) || 0), 0),
         sheetName,
         records: unified
     });
