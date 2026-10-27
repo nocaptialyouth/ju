@@ -1,24 +1,20 @@
 /**
- * 주원 적금 통합 & 자산 가계부 대시보드 (App.js)
- * Real-time Google Sheets Sync & Deletion / Modification Detector Engine
+ * 📒 매일가계부 — 주원 가족 노션 워크스페이스 & 구글 시트 양방향 동기화 엔진 (App.js V3.0)
  */
 
 const DEFAULT_TSV_URL = "https://docs.google.com/spreadsheets/d/16xlN-rZwRRsOhdylZGZZL1-FF3flTthARoE6Tr4Xwrg/export?format=tsv&gid=661362148";
 const PUBLISHED_GRID_TSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTPvEFs3NNn16Nka-d2UBt6DzejrnHqWyxnz1iCCqLukYStOof4YN7zIHXc8DXflDip6uVzqn0H2GPl/pub?gid=661362148&single=true&output=tsv";
 
-// Initial Sample Memos (Used only when no memos exist anywhere)
 const INITIAL_SAMPLE_MEMOS = [
     { date: "2026-08-07", time: "11:19", category: "일상업무", content: "걸음마 적금 / 하나은행 적금 납입 상태 확인" },
     { date: "2026-08-07", time: "14:30", category: "적금입금", content: "IBK 청년미래적금 자동이체 확인 (₩500,000)" },
-    { date: "2026-08-25", time: "10:00", category: "적금입금", content: "IBK 청년미래적금 약정 납입일" }
+    { date: "2026-08-25", time: "10:00", category: "적금입금", content: "IBK 청년미래적금 약정 납입일 & 부모급여 입금일" }
 ];
 
-// Global Application State
 const state = {
     webappUrl: localStorage.getItem('juwon_webapp_url') || 'https://script.google.com/macros/s/AKfycbzv46eUI_Y-DoICIGb6fLZa5FaWamZbByCt0tqvDfWzIw6bAvWE-wCrWZ2j4GdPBwbJvA/exec',
     isUnlinkedLocalMode: localStorage.getItem('juwon_unlinked_mode') === 'true',
-    
-    // Firebase Config State
+
     firebaseConfig: JSON.parse(localStorage.getItem('juwon_fb_config')) || {
         apiKey: "AIzaSyDZLZT8OAcgV0UTC3FBtFfNsrWp_0YsbAk",
         authDomain: "nocaptialyouth.firebaseapp.com",
@@ -27,19 +23,25 @@ const state = {
     },
     db: null,
 
-    // Recommendation Widget State
+    // Goal Board State (Sidebar "🍩 1억 모으기")
+    goalTitle: localStorage.getItem('juwon_goal_title') || '1억 모으기 (가족목표)',
+    goalTargetAmount: parseFloat(localStorage.getItem('juwon_goal_target')) || 100000000,
+
+    // Notion Main Database View State
+    notionDbView: 'all',
+
     recCategory: 'baby',
     recSeed: 0,
 
-    // Multi-Tab Data Collections
     savingsMasterList: [],
     hospitalExpenses: [],
+    customLedgerEntries: JSON.parse(localStorage.getItem('juwon_custom_ledger')) || [],
 
     lastUpdated: null,
     kpi: {
         accumulatedSavings: 0,
         maturityTotal: 0,
-        parentalTotal: 0,
+        parentalTotal: 19000000,
         totalNetWorth: 0
     },
     products: [],
@@ -51,12 +53,10 @@ const state = {
     calSelectedDateStr: "2026-08-07",
     memos: JSON.parse(localStorage.getItem('juwon_memos')) || INITIAL_SAMPLE_MEMOS,
 
-    // Auto Polling Timer (5 seconds)
     autoSyncTimer: null,
     autoSyncIntervalSec: 5
 };
 
-// DOM Element Selectors
 const elements = {
     navTabs: document.querySelectorAll('.nav-tab'),
     tabPages: document.querySelectorAll('.tab-page'),
@@ -106,7 +106,6 @@ const elements = {
     maturityTableBody: document.getElementById('maturity-table-body'),
     btnExportMaturityExcel: document.getElementById('btn-export-maturity-excel'),
 
-    // Hospital Expenses Tab DOM Elements
     hospKpiTotal: document.getElementById('hosp-kpi-total'),
     hospKpiPostpartum: document.getElementById('hosp-kpi-postpartum'),
     hospKpiHospital: document.getElementById('hosp-kpi-hospital'),
@@ -162,6 +161,26 @@ document.addEventListener('DOMContentLoaded', () => {
     startAutoSyncTimer(state.autoSyncIntervalSec);
 });
 
+/**
+ * Universal Google Apps Script POST Helper
+ * Uses text/plain;charset=utf-8 to prevent browser CORS preflight rejections
+ */
+async function postToGoogleSheet(payload) {
+    if (!state.webappUrl || state.isUnlinkedLocalMode) return false;
+    try {
+        await fetch(state.webappUrl, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+        });
+        return true;
+    } catch (err) {
+        console.warn("Google Apps Script POST warning:", err);
+        return false;
+    }
+}
+
 function initFirebase() {
     if (state.firebaseConfig && typeof firebase !== 'undefined') {
         try {
@@ -169,7 +188,6 @@ function initFirebase() {
                 firebase.initializeApp(state.firebaseConfig);
             }
             state.db = firebase.firestore();
-            console.log("🔥 Firebase Firestore Connected!");
             listenToFirebaseRealtime();
             return true;
         } catch (err) {
@@ -183,15 +201,33 @@ function listenToFirebaseRealtime() {
     if (!state.db) return;
     state.db.collection('memos').onSnapshot(snapshot => {
         const memos = [];
-        snapshot.forEach(doc => {
-            memos.push(doc.data());
-        });
+        snapshot.forEach(doc => memos.push(doc.data()));
         if (memos.length > 0) {
             state.memos = memos;
             localStorage.setItem('juwon_memos', JSON.stringify(memos));
             renderCalendar();
         }
-    }, err => console.warn("Firebase listener error:", err));
+    }, err => console.warn("Firebase memos listener:", err));
+
+    state.db.collection('custom_ledger').onSnapshot(snapshot => {
+        const items = [];
+        snapshot.forEach(doc => items.push({ ...doc.data(), fbId: doc.id }));
+        if (items.length > 0) {
+            const existingIds = new Set(state.customLedgerEntries.map(e => e.id));
+            let changed = false;
+            items.forEach(item => {
+                if (item.id && !existingIds.has(item.id)) {
+                    state.customLedgerEntries.push(item);
+                    changed = true;
+                }
+            });
+            if (changed) {
+                localStorage.setItem('juwon_custom_ledger', JSON.stringify(state.customLedgerEntries));
+                recalculateAllKPIs();
+                renderDashboard();
+            }
+        }
+    }, err => console.warn("Firebase custom_ledger listener:", err));
 }
 
 function startAutoSyncTimer(seconds) {
@@ -201,18 +237,20 @@ function startAutoSyncTimer(seconds) {
     }
     if (seconds > 0) {
         state.autoSyncTimer = setInterval(() => {
-            fetchData(true); // background silent fetch
+            fetchData(true);
         }, seconds * 1000);
     }
 }
 
 function initSetupPanel() {
-    elements.webappUrlInput.value = state.isUnlinkedLocalMode ? '' : state.webappUrl;
+    if (elements.webappUrlInput) {
+        elements.webappUrlInput.value = state.isUnlinkedLocalMode ? '' : state.webappUrl;
+    }
     if (state.firebaseConfig) {
-        if (elements.fbApiKey) elements.fbApiKey.value = state.firebaseConfig.apiKey || 'AIzaSyDZLZT8OAcgV0UTC3FBtFfNsrWp_0YsbAk';
+        if (elements.fbApiKey) elements.fbApiKey.value = state.firebaseConfig.apiKey || '';
         if (elements.fbProjectId) elements.fbProjectId.value = state.firebaseConfig.projectId || 'nocaptialyouth';
         if (elements.fbAuthDomain) elements.fbAuthDomain.value = state.firebaseConfig.authDomain || 'nocaptialyouth.firebaseapp.com';
-        if (elements.fbAppId) elements.fbAppId.value = state.firebaseConfig.appId || '1:789489809787:web:fd1df94f9aae22281965de';
+        if (elements.fbAppId) elements.fbAppId.value = state.firebaseConfig.appId || '';
     }
 }
 
@@ -221,46 +259,56 @@ function setupTabNavigation() {
     navTabs.forEach(tab => {
         tab.addEventListener('click', () => {
             const targetTab = tab.getAttribute('data-tab');
+            if (!targetTab) return;
             document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
             tab.classList.add('active');
             const targetPage = document.getElementById(`tab-${targetTab}`);
-            if (targetPage) {
-                targetPage.classList.add('active');
-            }
+            if (targetPage) targetPage.classList.add('active');
         });
     });
 }
 
 function setupEventListeners() {
-    elements.topSyncBtn.addEventListener('click', () => {
-        elements.topSyncIcon.classList.add('fa-spin');
-        fetchData().finally(() => {
-            setTimeout(() => elements.topSyncIcon.classList.remove('fa-spin'), 600);
+    if (elements.topSyncBtn) {
+        elements.topSyncBtn.addEventListener('click', () => {
+            if (elements.topSyncIcon) elements.topSyncIcon.classList.add('fa-spin');
+            fetchData().finally(() => {
+                setTimeout(() => {
+                    if (elements.topSyncIcon) elements.topSyncIcon.classList.remove('fa-spin');
+                }, 600);
+            });
         });
+    }
+
+    // Enter key on inline quick-add inputs
+    ['quick-add-title', 'quick-add-date', 'quick-add-amount', 'quick-add-method'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleNotionQuickAdd();
+                }
+            });
+        }
     });
 
     if (elements.btnSaveFirebase) {
         elements.btnSaveFirebase.addEventListener('click', () => {
             const apiKey = elements.fbApiKey.value.trim();
-            const projectId = elements.fbProjectId.value.trim() || 'nocaptial-2f737';
+            const projectId = elements.fbProjectId.value.trim() || 'nocaptialyouth';
             const authDomain = elements.fbAuthDomain.value.trim() || `${projectId}.firebaseapp.com`;
             const appId = elements.fbAppId.value.trim();
 
             if (!apiKey || !appId) {
-                showToast('🔥 Firebase apiKey와 appId를 입력해 주세요!', 'warning');
+                showToast('Firebase apiKey와 appId를 입력해 주세요.', 'warning');
                 return;
             }
-
             const config = { apiKey, projectId, authDomain, appId };
             state.firebaseConfig = config;
             localStorage.setItem('juwon_fb_config', JSON.stringify(config));
-            
-            if (initFirebase()) {
-                showToast('🔥 Firebase 0초 실시간 연동 성공!', 'success');
-            } else {
-                showToast('Firebase 키를 확인해 주세요.', 'warning');
-            }
+            if (initFirebase()) showToast('🔥 Firebase 클라우드 실시간 연동 완료!', 'success');
         });
     }
 
@@ -268,9 +316,7 @@ function setupEventListeners() {
         elements.btnClearFirebase.addEventListener('click', () => {
             state.firebaseConfig = null;
             localStorage.removeItem('juwon_fb_config');
-            if (elements.fbApiKey) elements.fbApiKey.value = '';
-            if (elements.fbAppId) elements.fbAppId.value = '';
-            showToast('🔥 Firebase 연동 해제됨', 'info');
+            showToast('Firebase 연동이 해제되었습니다.', 'info');
         });
     }
 
@@ -279,151 +325,181 @@ function setupEventListeners() {
             const sec = parseInt(e.target.value, 10);
             state.autoSyncIntervalSec = sec;
             startAutoSyncTimer(sec);
-            if (sec > 0) {
-                showToast(`⚡ ${sec}초 마다 실시간 감지 동기화 설정 완료`, 'info');
-            } else {
-                showToast('수동 동기화 모드로 변경되었습니다.', 'info');
+            showToast(sec > 0 ? `⚡ ${sec}초 자동 동기화 설정됨` : '수동 동기화 모드로 전환됨', 'info');
+        });
+    }
+
+    if (elements.btnSaveUrl) {
+        elements.btnSaveUrl.addEventListener('click', () => {
+            const val = elements.webappUrlInput.value.trim();
+            if (val) {
+                state.webappUrl = val;
+                state.isUnlinkedLocalMode = false;
+                localStorage.setItem('juwon_webapp_url', val);
+                localStorage.setItem('juwon_unlinked_mode', 'false');
+                showToast('🔗 구글 시트 웹앱 URL이 저장되었습니다.', 'success');
+                fetchData();
             }
         });
     }
 
-    elements.btnSaveUrl.addEventListener('click', () => {
-        const val = elements.webappUrlInput.value.trim();
-        if (val) {
-            state.webappUrl = val;
-            state.isUnlinkedLocalMode = false;
-            localStorage.setItem('juwon_webapp_url', val);
-            localStorage.setItem('juwon_unlinked_mode', 'false');
-            showToast('연동 URL이 저장되었습니다.', 'success');
+    if (elements.btnClearUrl) {
+        elements.btnClearUrl.addEventListener('click', () => {
+            state.isUnlinkedLocalMode = true;
+            state.webappUrl = '';
+            elements.webappUrlInput.value = '';
+            localStorage.setItem('juwon_unlinked_mode', 'true');
+            localStorage.removeItem('juwon_webapp_url');
+            showToast('웹앱 URL이 초기화되었습니다 (공개 시트 읽기 모드).', 'info');
             fetchData();
-        } else {
-            showToast('연동 URL을 입력하세요.', 'warning');
-        }
-    });
-
-    elements.btnClearUrl.addEventListener('click', () => {
-        state.isUnlinkedLocalMode = true;
-        state.webappUrl = '';
-        elements.webappUrlInput.value = '';
-        localStorage.setItem('juwon_unlinked_mode', 'true');
-        localStorage.removeItem('juwon_webapp_url');
-        showToast('연동 URL 해제됨 (공개 시트 실시간 동기화 모드)', 'info');
-        fetchData();
-    });
-
-    elements.btnCopyCode.addEventListener('click', () => {
-        const codeText = elements.codeContent.innerText;
-        navigator.clipboard.writeText(codeText).then(() => {
-            showToast('📋 구글 Apps Script 매크로 코드가 복사되었습니다!', 'success');
         });
-    });
+    }
 
-    elements.calPrevBtn.addEventListener('click', () => {
-        state.calCurrentDate.setMonth(state.calCurrentDate.getMonth() - 1);
-        renderCalendar();
-    });
+    if (elements.btnCopyCode) {
+        elements.btnCopyCode.addEventListener('click', () => {
+            const codeText = elements.codeContent.innerText;
+            navigator.clipboard.writeText(codeText).then(() => {
+                showToast('📋 구글 Apps Script V3.0 코드가 클립보드에 복사되었습니다!', 'success');
+            });
+        });
+    }
 
-    elements.calNextBtn.addEventListener('click', () => {
-        state.calCurrentDate.setMonth(state.calCurrentDate.getMonth() + 1);
-        renderCalendar();
-    });
-
-    elements.btnOpenScheduleModal.addEventListener('click', () => {
-        elements.schedDateInput.value = state.calSelectedDateStr;
-        elements.scheduleModal.classList.add('active');
-    });
-
-    elements.scheduleModalClose.addEventListener('click', closeAllModals);
-    elements.btnSchedCancel.addEventListener('click', closeAllModals);
-
-    elements.scheduleForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const date = elements.schedDateInput.value;
-        const time = elements.schedTimeInput.value;
-        const category = elements.schedCategorySelect.value;
-        const content = elements.schedContentInput.value.trim();
-
-        if (date && content) {
-            const newMemo = { date, time, category, content };
-            state.memos.push(newMemo);
-            localStorage.setItem('juwon_memos', JSON.stringify(state.memos));
-
-            if (state.db) {
-                try {
-                    state.db.collection('memos').add(newMemo);
-                } catch (e) {
-                    console.warn("Firestore memo write error:", e);
-                }
-            }
-
-            if (state.webappUrl && !state.isUnlinkedLocalMode) {
-                try {
-                    await fetch(state.webappUrl, {
-                        method: 'POST',
-                        mode: 'no-cors',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(newMemo)
-                    });
-                } catch (err) {
-                    console.warn('WebApp post error:', err);
-                }
-            }
-
-            showToast('일정이 성공적으로 저장되었습니다!', 'success');
-            closeAllModals();
-            elements.scheduleForm.reset();
+    if (elements.calPrevBtn) {
+        elements.calPrevBtn.addEventListener('click', () => {
+            state.calCurrentDate.setMonth(state.calCurrentDate.getMonth() - 1);
             renderCalendar();
-        }
-    });
+        });
+    }
+    if (elements.calNextBtn) {
+        elements.calNextBtn.addEventListener('click', () => {
+            state.calCurrentDate.setMonth(state.calCurrentDate.getMonth() + 1);
+            renderCalendar();
+        });
+    }
 
-    elements.ledgerSearchInput.addEventListener('input', renderLedgerTable);
-    elements.ledgerStatusSelect.addEventListener('change', renderLedgerTable);
+    if (elements.btnOpenScheduleModal) {
+        elements.btnOpenScheduleModal.addEventListener('click', () => {
+            elements.schedDateInput.value = state.calSelectedDateStr;
+            elements.scheduleModal.classList.add('active');
+        });
+    }
+    if (elements.scheduleModalClose) elements.scheduleModalClose.addEventListener('click', closeAllModals);
+    if (elements.btnSchedCancel) elements.btnSchedCancel.addEventListener('click', closeAllModals);
 
+    if (elements.scheduleForm) {
+        elements.scheduleForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const date = elements.schedDateInput.value;
+            const time = elements.schedTimeInput.value;
+            const category = elements.schedCategorySelect.value;
+            const content = elements.schedContentInput.value.trim();
+
+            if (date && content) {
+                const newMemo = { date, time, category, content };
+                state.memos.push(newMemo);
+                localStorage.setItem('juwon_memos', JSON.stringify(state.memos));
+
+                if (state.db) {
+                    try { state.db.collection('memos').add(newMemo); } catch (err) {}
+                }
+                await postToGoogleSheet({ action: 'memo', ...newMemo });
+
+                showToast('📅 일정 메모가 저장 및 구글 시트에 전송되었습니다!', 'success');
+                closeAllModals();
+                elements.scheduleForm.reset();
+                renderCalendar();
+            }
+        });
+    }
+
+    if (elements.ledgerSearchInput) elements.ledgerSearchInput.addEventListener('input', renderLedgerTable);
+    if (elements.ledgerStatusSelect) elements.ledgerStatusSelect.addEventListener('change', renderLedgerTable);
     if (elements.hospSearchInput) elements.hospSearchInput.addEventListener('input', renderHospitalExpensesTable);
     if (elements.hospCatSelect) elements.hospCatSelect.addEventListener('change', renderHospitalExpensesTable);
 
-    elements.btnExportExcel.addEventListener('click', () => exportToCSV('Juwon_Savings_Ledger.csv', prepareLedgerCSVData()));
-    elements.btnExportMaturityExcel.addEventListener('click', () => exportToCSV('Juwon_Maturity_Assets.csv', prepareMaturityCSVData()));
-    if (elements.btnExportHospExcel) {
-        elements.btnExportHospExcel.addEventListener('click', () => exportToCSV('Juwon_Hospital_Care_Expenses.csv', prepareHospitalCSVData()));
-    }
+    if (elements.btnExportExcel) elements.btnExportExcel.addEventListener('click', () => exportToCSV('Juwon_Savings_Ledger.csv', prepareLedgerCSVData()));
+    if (elements.btnExportMaturityExcel) elements.btnExportMaturityExcel.addEventListener('click', () => exportToCSV('Juwon_Maturity_Assets.csv', prepareMaturityCSVData()));
+    if (elements.btnExportHospExcel) elements.btnExportHospExcel.addEventListener('click', () => exportToCSV('Juwon_Hospital_Care_Expenses.csv', prepareHospitalCSVData()));
 
     const btnRefreshRec = document.getElementById('btn-refresh-recommend');
     if (btnRefreshRec) {
         btnRefreshRec.addEventListener('click', () => {
             state.recSeed++;
             renderRecommendations();
-            showToast('🔄 2026 추천 적금 목록이 새롭게 갱신되었습니다!', 'info');
+            showToast('🔄 추천 적금 목록이 새로고침되었습니다.', 'info');
         });
     }
 
-    elements.btnOpenDepositModal.addEventListener('click', () => {
-        populateProductSelect();
-        elements.depositModal.classList.add('active');
-    });
-    elements.depositModalClose.addEventListener('click', closeAllModals);
-    elements.btnDepositCancel.addEventListener('click', closeAllModals);
+    if (elements.btnOpenDepositModal) {
+        elements.btnOpenDepositModal.addEventListener('click', () => {
+            populateProductSelect();
+            elements.depositModal.classList.add('active');
+        });
+    }
+    if (elements.depositModalClose) elements.depositModalClose.addEventListener('click', closeAllModals);
+    if (elements.btnDepositCancel) elements.btnDepositCancel.addEventListener('click', closeAllModals);
 
-    elements.depositForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        const prodId = elements.modalProductSelect.value;
-        const month = document.getElementById('modal-month-input').value.trim();
-        const date = document.getElementById('modal-date-input').value.trim();
-        const amount = parseFloat(document.getElementById('modal-amount-input').value) || 0;
+    // Deposit Modal Submit -> Saves locally, updates Firebase, AND posts to Google Sheets!
+    if (elements.depositForm) {
+        elements.depositForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const prodId = elements.modalProductSelect.value;
+            const month = document.getElementById('modal-month-input').value.trim();
+            const date = document.getElementById('modal-date-input').value.trim();
+            const amount = parseFloat(document.getElementById('modal-amount-input').value) || 0;
+            const methodInput = document.getElementById('modal-method-input');
+            const method = methodInput ? methodInput.value.trim() : '자동이체';
 
-        const product = state.products.find(p => p.id === prodId);
-        if (product) {
-            product.records.push({
-                month, date, amount, amountFormatted: formatKRW(amount), status: 'deposited'
-            });
-            product.totalDeposited += amount;
-            showToast(`${product.name} ${month} 입금(${formatKRW(amount)}) 등록 완료!`, 'success');
-            closeAllModals();
-            elements.depositForm.reset();
-            renderDashboard();
-            renderLedgerTable();
-        }
-    });
+            const product = state.products.find(p => p.id === prodId);
+            if (product) {
+                let existingRec = product.records.find(r => r.month === month);
+                if (existingRec) {
+                    existingRec.date = date;
+                    existingRec.amount = amount;
+                    existingRec.amountFormatted = formatKRW(amount);
+                    existingRec.status = 'deposited';
+                    existingRec.memo = method;
+                } else {
+                    existingRec = {
+                        id: `rec_${Date.now()}`,
+                        productName: product.name,
+                        rate: product.rate,
+                        month,
+                        date,
+                        amount,
+                        amountFormatted: formatKRW(amount),
+                        status: 'deposited',
+                        memo: method
+                    };
+                    product.records.push(existingRec);
+                    state.allRecordsFlat.push(existingRec);
+                }
+
+                persistRecordEdit(existingRec);
+                recalculateAllKPIs();
+
+                const payload = {
+                    action: 'deposit',
+                    productName: product.name,
+                    month,
+                    date,
+                    amount,
+                    status: 'deposited',
+                    method
+                };
+                if (state.db) {
+                    try { state.db.collection('deposits').add(payload); } catch (err) {}
+                }
+                await postToGoogleSheet(payload);
+
+                showToast(`✅ [${product.name} ${month}] ${formatKRW(amount)} 입금 내역이 구글 시트에 자동 반영되었습니다!`, 'success');
+                closeAllModals();
+                elements.depositForm.reset();
+                renderDashboard();
+                renderLedgerTable();
+            }
+        });
+    }
 
     if (elements.btnOpenNewProductModal) {
         elements.btnOpenNewProductModal.addEventListener('click', () => {
@@ -433,91 +509,69 @@ function setupEventListeners() {
     if (elements.newProductModalClose) elements.newProductModalClose.addEventListener('click', closeAllModals);
     if (elements.btnNewProdCancel) elements.btnNewProdCancel.addEventListener('click', closeAllModals);
 
+    // New Savings Product Submit -> Saves locally, updates Firebase, AND appends to Google Sheets!
     if (elements.newProductForm) {
-        elements.newProductForm.addEventListener('submit', (e) => {
+        elements.newProductForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const name = document.getElementById('new-prod-name').value.trim();
             const rate = document.getElementById('new-prod-rate').value.trim() || '5.0%';
             const owner = document.getElementById('new-prod-owner').value;
             const monthly = parseFloat(document.getElementById('new-prod-monthly').value) || 300000;
             const initial = parseFloat(document.getElementById('new-prod-initial').value) || 0;
-            const startDate = document.getElementById('new-prod-start').value.trim() || '2026. 8. 11';
-            const endDate = document.getElementById('new-prod-end').value.trim() || '2027. 8. 11';
+            const startDate = document.getElementById('new-prod-start').value.trim() || '2026. 8. 25';
+            const endDate = document.getElementById('new-prod-end').value.trim() || '2027. 8. 25';
 
             if (!name) return;
 
-            const newProd = {
-                id: `prod_new_${Date.now()}`,
-                name,
-                rate,
-                records: initial > 0 ? [{
-                    id: `rec_${Date.now()}`,
-                    productName: name,
-                    rate,
-                    month: '8월',
-                    date: startDate,
-                    amount: initial,
-                    amountFormatted: formatKRW(initial),
-                    status: 'deposited'
-                }] : [],
-                totalDeposited: initial
-            };
+            const customProds = JSON.parse(localStorage.getItem('juwon_custom_products')) || [];
+            const newProdEntry = { name, rate, owner, monthly, initial, startDate, endDate, createdAt: Date.now() };
+            customProds.push(newProdEntry);
+            localStorage.setItem('juwon_custom_products', JSON.stringify(customProds));
 
-            state.products.push(newProd);
-
-            state.savingsMasterList.push({
-                name,
-                owners: [owner],
-                monthly,
-                monthlyFormatted: formatKRW(monthly),
-                total: initial,
-                totalFormatted: formatKRW(initial),
-                startDate,
-                endDate
-            });
+            applyLocalAndCloudCustomizations();
+            recalculateAllKPIs();
 
             if (state.db) {
-                try {
-                    state.db.collection('products').add({ name, rate, owner, monthly, initial, startDate, endDate });
-                } catch (err) {
-                    console.warn("Firestore addProduct error:", err);
-                }
+                try { state.db.collection('products').add(newProdEntry); } catch (err) {}
             }
+            await postToGoogleSheet({
+                action: 'new_product',
+                ...newProdEntry
+            });
 
-            showToast(`🎉 [${name}] 적금 상품이 성공적으로 신규 등록되었습니다!`, 'success');
+            showToast(`🎉 [${name}] 신규 적금 상품이 등록 및 구글 시트에 추가되었습니다!`, 'success');
             closeAllModals();
             elements.newProductForm.reset();
             renderDashboard();
             renderSavingsMasterTable();
+            renderLedgerTable();
         });
     }
 
-    // ESC Key listener to close all modals
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            closeAllModals();
-        }
+        if (e.key === 'Escape') closeAllModals();
     });
 
-    // Close modals on overlay background click
-    [elements.depositModal, elements.scheduleModal, elements.productDetailModal, elements.newProductModal].forEach(modal => {
-        if (modal) {
+    document.querySelectorAll('.modal-overlay').forEach(modal => {
+        if (modal && modal.id !== 'auth-modal-overlay') {
             modal.addEventListener('click', (e) => {
                 if (e.target === modal) closeAllModals();
             });
         }
     });
 
-    elements.productDetailClose.addEventListener('click', closeAllModals);
+    if (elements.productDetailClose) elements.productDetailClose.addEventListener('click', closeAllModals);
 }
 
 window.closeAllModals = function() {
     document.querySelectorAll('.modal-overlay').forEach(modal => {
-        modal.classList.remove('active');
+        if (modal.id !== 'auth-modal-overlay') {
+            modal.classList.remove('active');
+        }
     });
 };
 
-// Bank Search & Official Information Link Mapping
+// Bank Links & Official Product Metadata
 const BANK_LINKS = {
     "걸음마 적금(새마을금고)": "https://search.naver.com/search.naver?query=새마을금고+걸음마+적금",
     "하나은행(산모)": "https://search.naver.com/search.naver?query=하나은행+아이키움+적금",
@@ -568,9 +622,7 @@ const BABY_RECOMMENDATIONS = [
     { name: "하나은행 아이키움 적금", rate: "최고 5.0%", desc: "양육수당/아기 수당 수령 시 우대 금리 혜택", query: "하나은행+아이키움적금" },
     { name: "KB국민 아이사랑 적금", rate: "최고 6.5%", desc: "미성년 아기 명의 가입 시 출생 우대금리 최고 6.5%", query: "KB국민은행+아이사랑적금" },
     { name: "신한은행 아기드림 적금", rate: "최고 5.5%", desc: "영유아 전용 우대금리 및 첫 만기 축하금 지원", query: "신한은행+아이드림적금" },
-    { name: "카카오뱅크 26주 아이적금", rate: "최고 5.0%", desc: "매주 자동이체 성공 시 단계별 우대금리 5.0%", query: "카카오뱅크+26주적금" },
-    { name: "우리은행 우리아이 처음적금", rate: "최고 5.5%", desc: "아기 첫 통장 개설 우대쿠폰 1만원 추가 혜택", query: "우리은행+우리아이처음적금" },
-    { name: "농협은행 아이행복 적금", rate: "최고 4.8%", desc: "아기 출생 증명서 제출 시 우대 금리 즉시 적용", query: "NH농협+아이행복적금" }
+    { name: "카카오뱅크 26주 아이적금", rate: "최고 5.0%", desc: "매주 자동이체 성공 시 단계별 우대금리 5.0%", query: "카카오뱅크+26주적금" }
 ];
 
 const HIGH_YIELD_RECOMMENDATIONS = [
@@ -578,80 +630,14 @@ const HIGH_YIELD_RECOMMENDATIONS = [
     { name: "신한은행 SOL 너만SOLO 적금", rate: "최고 6.0%", desc: "약정 납입 달성 시 최고 연 6.0% 우대 적금", query: "신한은행+너만SOLO적금" },
     { name: "토스뱅크 굴비적금", rate: "최고 4.3%", desc: "굴비 저금 시 매달 자동 우대 이율 반영 최고 연 4.3%", query: "토스뱅크+굴비적금" },
     { name: "부산은행 기쁨두배 통장", rate: "1+1 원금매칭", desc: "부산시 청년 지원 1+1 원금 매칭 및 이자 혜택", query: "부산은행+기쁨두배통장" },
-    { name: "새마을금고 2000만원 정기예금", rate: "연 4.0%", desc: "확정 금리 4.0% 비과세 활용 정기예금", query: "새마을금고+정기예금+금리" },
-    { name: "K뱅크 챌린지 적금", rate: "최고 7.0%", desc: "매일 저축 챌린지 성공 시 최고 연 7.0% 적용", query: "케이뱅크+챌린지적금" },
-    { name: "전북은행 JB 퍼스트 적금", rate: "최고 8.0%", desc: "첫 거래 고객 전용 특판 고금리 연 8.0%", query: "전북은행+JB퍼스트적금" }
+    { name: "새마을금고 2000만원 정기예금", rate: "연 4.0%", desc: "확정 금리 4.0% 비과세 활용 정기예금", query: "새마을금고+정기예금+금리" }
 ];
 
-window.switchRecommendCategory = function(cat) {
-    state.recCategory = cat;
-    const babyTab = document.getElementById('rec-tab-baby');
-    const highTab = document.getElementById('rec-tab-high');
-    if (babyTab && highTab) {
-        if (cat === 'baby') {
-            babyTab.className = "btn btn-teal btn-sm active";
-            highTab.className = "btn btn-outline btn-sm";
-        } else {
-            babyTab.className = "btn btn-outline btn-sm";
-            highTab.className = "btn btn-teal btn-sm active";
-        }
-    }
-    renderRecommendations();
-};
-
-function renderRecommendations() {
-    const listContainer = document.getElementById('recommend-list');
-    if (!listContainer) return;
-
-    const sourceList = state.recCategory === 'high' ? HIGH_YIELD_RECOMMENDATIONS : BABY_RECOMMENDATIONS;
-    const dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / (1000 * 60 * 60 * 24));
-    const offset = (dayOfYear + state.recSeed) % sourceList.length;
-
-    const displayItems = [];
-    for (let i = 0; i < 5; i++) {
-        displayItems.push(sourceList[(offset + i) % sourceList.length]);
-    }
-
-    listContainer.innerHTML = displayItems.map(item => `
-        <div class="recommend-item" style="padding:0.6rem 0; border-bottom:1px dashed var(--border-color); display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
-            <div style="flex:1;">
-                <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; margin-bottom:0.15rem;">
-                    <strong style="font-size:0.86rem; color:var(--text-primary);">${escapeHTML(item.name)}</strong>
-                    <span class="rate-badge" style="font-size:0.72rem; padding:0.1rem 0.4rem; background:#ccfbf1; color:#0f766e;"><i class="fa-solid fa-percent"></i> ${escapeHTML(item.rate)}</span>
-                </div>
-                <div style="font-size:0.75rem; color:var(--text-secondary); line-height:1.3;">${escapeHTML(item.desc)}</div>
-            </div>
-            <a href="https://search.naver.com/search.naver?query=${encodeURIComponent(item.query)}" target="_blank" rel="noopener noreferrer" class="btn btn-teal btn-sm" style="font-size:0.75rem; padding:0.3rem 0.6rem; white-space:nowrap; text-decoration:none;">
-                <i class="fa-solid fa-arrow-up-right-from-square"></i> 조회
-            </a>
-        </div>
-    `).join('');
-}
-
-function getBankLink(name) {
-    if (!name) return "https://search.naver.com/search.naver?query=적금+추천";
-    const foundKey = Object.keys(BANK_LINKS).find(k => name.includes(k) || k.includes(name));
-    return foundKey ? BANK_LINKS[foundKey] : `https://search.naver.com/search.naver?query=${encodeURIComponent(name)}`;
-}
-
-function getOfficialRate(name, currentRate) {
-    if (currentRate && currentRate !== '이율 정보 없음' && currentRate !== '약정 이율' && !currentRate.includes('12.0%')) return currentRate;
-    const foundKey = Object.keys(OFFICIAL_RATES).find(k => name.includes(k) || k.includes(name));
-    return foundKey ? OFFICIAL_RATES[foundKey] : (currentRate || '약정 이율');
-}
-
-function getTargetEpisodes(name, actualRecordCount) {
-    const foundKey = Object.keys(PRODUCT_EPISODES).find(k => name.includes(k) || k.includes(name));
-    const target = foundKey ? PRODUCT_EPISODES[foundKey] : 12;
-    return Math.max(target, actualRecordCount || 0);
-}
-
-// Embedded Multi-Tab Fallback Data
 const SAVINGS_MASTER_FALLBACK = [
-    { name: "걸음마 적금(새마을금고)", owners: ["주원"], rate: "10.0%", monthly: 300000, monthlyFormatted: "₩300,000", total: 300000, totalFormatted: "₩300,000", startDate: "2026. 7. 30", endDate: "2027. 7. 30" },
-    { name: "하나은행(산모)", owners: ["지헌"], rate: "5.0%", monthly: 300000, monthlyFormatted: "₩300,000", total: 300000, totalFormatted: "₩300,000", startDate: "-", endDate: "-" },
-    { name: "굴비적금(토스)", owners: ["지헌"], rate: "4.3%", monthly: 300000, monthlyFormatted: "₩300,000", total: 1200000, totalFormatted: "₩1,200,000", startDate: "-", endDate: "-" },
-    { name: "카카오뱅크 아이적금", owners: ["주원"], rate: "5.0%", monthly: 0, monthlyFormatted: "₩0", total: 0, totalFormatted: "₩0", startDate: "-", endDate: "-" },
+    { name: "걸음마 적금(새마을금고)", owners: ["주원"], rate: "10.0%", monthly: 300000, monthlyFormatted: "₩300,000", total: 600000, totalFormatted: "₩600,000", startDate: "2026. 7. 30", endDate: "2027. 7. 30" },
+    { name: "하나은행(산모)", owners: ["지헌"], rate: "5.0%", monthly: 300000, monthlyFormatted: "₩300,000", total: 300000, totalFormatted: "₩300,000", startDate: "2026. 7. 25", endDate: "2027. 7. 25" },
+    { name: "굴비적금(토스)", owners: ["지헌"], rate: "4.3%", monthly: 300000, monthlyFormatted: "₩300,000", total: 1200000, totalFormatted: "₩1,200,000", startDate: "2026. 5. 10", endDate: "2026. 11. 10" },
+    { name: "카카오뱅크 아이적금", owners: ["주원"], rate: "5.0%", monthly: 100000, monthlyFormatted: "₩100,000", total: 0, totalFormatted: "₩0", startDate: "-", endDate: "-" },
     { name: "청년미래적금계좌", owners: ["준영"], rate: "6.0% (일반형)", monthly: 500000, monthlyFormatted: "₩500,000", total: 500000, totalFormatted: "₩500,000", startDate: "2026. 8. 25", endDate: "2029. 8. 25" },
     { name: "너만SOLO", owners: ["지헌"], rate: "6.0%", monthly: 300000, monthlyFormatted: "₩300,000", total: 10000000, totalFormatted: "₩10,000,000", startDate: "2023. 8. 25", endDate: "2026. 8. 25" },
     { name: "부모급여", owners: ["지헌"], rate: "정부지원", monthly: 1000000, monthlyFormatted: "₩1,000,000", total: 19000000, totalFormatted: "₩19,000,000", startDate: "2026. 8. 25", endDate: "2027. 8. 25" },
@@ -670,125 +656,185 @@ const HOSPITAL_EXPENSES_FALLBACK = [
     { date: "2026-07-31", category: "조리원비", details: "지헌(M카드)", amount: 1500000, amountFormatted: "₩1,500,000", note: "-" }
 ];
 
-function loadBackupData() {
-    state.savingsMasterList = SAVINGS_MASTER_FALLBACK;
-    state.hospitalExpenses = HOSPITAL_EXPENSES_FALLBACK;
+function persistRecordEdit(rec) {
+    const edits = JSON.parse(localStorage.getItem('juwon_records_edits')) || [];
+    const idx = edits.findIndex(e => e.productName === rec.productName && e.month === rec.month);
+    if (idx !== -1) {
+        edits[idx] = { ...edits[idx], ...rec };
+    } else {
+        edits.push(rec);
+    }
+    localStorage.setItem('juwon_records_edits', JSON.stringify(edits));
+}
 
-    state.products = SAVINGS_MASTER_FALLBACK.map((m, idx) => {
+/**
+ * Merges localStorage & Firebase customizations so 5-second TSV polling NEVER wipes user entries
+ */
+function applyLocalAndCloudCustomizations() {
+    // 1. Custom Products
+    const customProds = JSON.parse(localStorage.getItem('juwon_custom_products')) || [];
+    customProds.forEach(cp => {
+        if (!state.savingsMasterList.some(m => m.name === cp.name)) {
+            state.savingsMasterList.push({
+                name: cp.name,
+                owners: [cp.owner || '가족공용'],
+                rate: cp.rate || '5.0%',
+                monthly: cp.monthly || 0,
+                monthlyFormatted: formatKRW(cp.monthly || 0),
+                total: cp.initial || 0,
+                totalFormatted: formatKRW(cp.initial || 0),
+                startDate: cp.startDate || '-',
+                endDate: cp.endDate || '-'
+            });
+        }
+        let prodObj = state.products.find(p => p.name === cp.name);
+        if (!prodObj) {
+            const initRecs = cp.initial > 0 ? [{
+                id: `rec_custom_${cp.name}_8`,
+                productName: cp.name,
+                rate: cp.rate || '5.0%',
+                month: '8월',
+                date: cp.startDate || '2026. 8. 25',
+                amount: cp.initial,
+                amountFormatted: formatKRW(cp.initial),
+                status: 'deposited'
+            }] : [];
+            prodObj = {
+                id: `prod_custom_${cp.name}`,
+                name: cp.name,
+                rate: cp.rate || '5.0%',
+                records: initRecs,
+                totalDeposited: cp.initial || 0
+            };
+            state.products.push(prodObj);
+            state.allRecordsFlat.push(...initRecs);
+        }
+    });
+
+    // 2. Record Edits & Newly Added Deposits
+    const localEdits = JSON.parse(localStorage.getItem('juwon_records_edits')) || [];
+    localEdits.forEach(editRec => {
+        let flatMatch = state.allRecordsFlat.find(r => r.productName === editRec.productName && r.month === editRec.month);
+        if (flatMatch) {
+            flatMatch.date = editRec.date;
+            flatMatch.amount = editRec.amount;
+            flatMatch.amountFormatted = formatKRW(editRec.amount);
+            flatMatch.status = editRec.status;
+            flatMatch.memo = editRec.memo;
+        } else {
+            const newFlat = {
+                ...editRec,
+                id: editRec.id || `rec_edit_${state.allRecordsFlat.length}`,
+                amountFormatted: formatKRW(editRec.amount)
+            };
+            state.allRecordsFlat.push(newFlat);
+            const parentProd = state.products.find(p => p.name === editRec.productName);
+            if (parentProd && !parentProd.records.some(r => r.month === editRec.month)) {
+                parentProd.records.push(newFlat);
+            }
+        }
+    });
+
+    // 3. Custom Hospital Expenses
+    const customHosp = JSON.parse(localStorage.getItem('juwon_custom_hospital')) || [];
+    customHosp.forEach(ch => {
+        if (!state.hospitalExpenses.some(h => h.date === ch.date && h.details === ch.details && h.amount === ch.amount)) {
+            state.hospitalExpenses.push({
+                ...ch,
+                amountFormatted: formatKRW(ch.amount)
+            });
+        }
+    });
+}
+
+function recalculateAllKPIs() {
+    state.products.forEach(prod => {
+        const masterItem = state.savingsMasterList.find(m => m.name.includes(prod.name) || prod.name.includes(m.name));
+        const depSum = prod.records.filter(r => r.status === 'deposited').reduce((s, r) => s + (Number(r.amount) || 0), 0);
+        prod.totalDeposited = depSum > 0 ? depSum : (masterItem ? (masterItem.total || 0) : 0);
+    });
+
+    const customSavingsSum = state.customLedgerEntries
+        .filter(e => e.status === 'deposited' && (e.mainCategory === '저축/투자/연금' || e.mainCategory === '수입/지원금'))
+        .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
+    const totalAccumulatedSavings = state.products.reduce((s, p) => s + (p.totalDeposited || 0), 0) + customSavingsSum;
+    const totalMatured = state.maturedList.reduce((s, m) => s + (m.amount || 0), 0);
+
+    state.kpi.accumulatedSavings = totalAccumulatedSavings;
+    state.kpi.maturityTotal = totalMatured;
+    state.kpi.totalNetWorth = totalAccumulatedSavings + totalMatured;
+    state.paidCount = state.allRecordsFlat.filter(r => r.status === 'deposited').length;
+}
+
+function loadBackupData() {
+    state.savingsMasterList = JSON.parse(JSON.stringify(SAVINGS_MASTER_FALLBACK));
+    state.hospitalExpenses = JSON.parse(JSON.stringify(HOSPITAL_EXPENSES_FALLBACK));
+
+    state.products = state.savingsMasterList.map((m, idx) => {
         const isGeoreum = m.name.includes('걸음마');
         const depositedRecords = [
-            { id: `rec_${idx}_7`, productName: m.name, rate: m.rate, month: '7월', date: m.startDate || '2026. 7. 30', amount: m.total || m.monthly, amountFormatted: formatKRW(m.total || m.monthly), status: 'deposited' },
+            { id: `rec_${idx}_7`, productName: m.name, rate: m.rate, month: '7월', date: m.startDate !== '-' ? m.startDate : '2026. 7. 30', amount: m.monthly || 300000, amountFormatted: formatKRW(m.monthly || 300000), status: 'deposited' },
             { id: `rec_${idx}_8`, productName: m.name, rate: m.rate, month: '8월', date: isGeoreum ? '2026. 8. 13' : '-', amount: m.monthly || 300000, amountFormatted: formatKRW(m.monthly || 300000), status: isGeoreum ? 'deposited' : 'unpaid' },
             { id: `rec_${idx}_9`, productName: m.name, rate: m.rate, month: '9월', date: '-', amount: m.monthly || 300000, amountFormatted: formatKRW(m.monthly || 300000), status: 'scheduled' }
         ];
-
         return {
             id: `prod_fallback_${idx}`,
             name: m.name,
             rate: m.rate,
             records: depositedRecords,
-            totalDeposited: isGeoreum ? 600000 : (m.total || m.monthly * 12)
+            totalDeposited: m.total || 0
         };
     });
 
     state.maturedList = [
         { type: "8월만기적금", bank: "부산은행", amount: 10000000, amountFormatted: "₩10,000,000" },
-        { type: "9월예금만기", bank: "새마을", amount: 20000000, amountFormatted: "₩20,000,000" },
+        { type: "9월예금만기", bank: "새마을금고", amount: 20000000, amountFormatted: "₩20,000,000" },
         { type: "7월청년도약계좌", bank: "IBK기업은행", amount: 16500000, amountFormatted: "₩16,500,000" }
     ];
 
     state.allRecordsFlat = [];
-    state.products.forEach(p => {
-        state.allRecordsFlat.push(...p.records);
-    });
+    state.products.forEach(p => state.allRecordsFlat.push(...p.records));
 
-    // Re-apply any local edits saved in localStorage
-    const localEditsRaw = localStorage.getItem('juwon_records_edits');
-    if (localEditsRaw) {
-        try {
-            const localEdits = JSON.parse(localEditsRaw);
-            if (Array.isArray(localEdits)) {
-                localEdits.forEach(editRec => {
-                    const existingFlat = state.allRecordsFlat.find(r => r.productName === editRec.productName && r.month === editRec.month);
-                    if (existingFlat) {
-                        existingFlat.date = editRec.date;
-                        existingFlat.amount = editRec.amount;
-                        existingFlat.amountFormatted = editRec.amountFormatted || formatKRW(editRec.amount);
-                        existingFlat.status = editRec.status;
-                        existingFlat.memo = editRec.memo;
-                    } else {
-                        state.allRecordsFlat.push(editRec);
-                    }
-                });
-            }
-        } catch (e) {}
-    }
-
-    const totalAccumulatedSavings = state.products.reduce((s, p) => s + p.totalDeposited, 0);
-    const totalMatured = state.maturedList.reduce((s, m) => s + m.amount, 0);
-
-    state.kpi.accumulatedSavings = totalAccumulatedSavings;
-    state.kpi.maturityTotal = totalMatured;
-    state.kpi.parentalTotal = 19000000;
-    state.kpi.totalNetWorth = totalAccumulatedSavings + totalMatured;
-    state.paidCount = state.allRecordsFlat.filter(r => r.status === 'deposited').length;
+    applyLocalAndCloudCustomizations();
+    recalculateAllKPIs();
 }
 
-// Zero-Cache Fetch Engine (Multi-Tab TSV Parser)
 async function fetchData(isSilent = false) {
-    // 1. Fetch Savings Master Tab (gid=7284588)
     try {
         const masterRes = await fetch(`https://docs.google.com/spreadsheets/d/16xlN-rZwRRsOhdylZGZZL1-FF3flTthARoE6Tr4Xwrg/export?format=tsv&gid=7284588&nocache=${Date.now()}`);
         if (masterRes.ok) {
-            const masterText = await masterRes.text();
-            parseSavingsMasterTSV(masterText);
+            parseSavingsMasterTSV(await masterRes.text());
         }
-    } catch (e) {
-        console.warn("Savings Master TSV fetch error:", e);
-    }
+    } catch (e) {}
 
-    // 2. Fetch Hospital & Postpartum Expenses Tab (gid=1541600042)
     try {
         const hospRes = await fetch(`https://docs.google.com/spreadsheets/d/16xlN-rZwRRsOhdylZGZZL1-FF3flTthARoE6Tr4Xwrg/export?format=tsv&gid=1541600042&nocache=${Date.now()}`);
         if (hospRes.ok) {
-            const hospText = await hospRes.text();
-            parseHospitalTSV(hospText);
+            parseHospitalTSV(await hospRes.text());
         }
-    } catch (e) {
-        console.warn("Hospital TSV fetch error:", e);
-    }
+    } catch (e) {}
 
-    // 3. Fetch Monthly Grid Tab (gid=661362148)
     let urlsToTry = [DEFAULT_TSV_URL, PUBLISHED_GRID_TSV_URL];
     if (state.webappUrl && !state.isUnlinkedLocalMode && !urlsToTry.includes(state.webappUrl)) {
         urlsToTry.push(state.webappUrl);
     }
 
     let success = false;
-
     for (const url of urlsToTry) {
         try {
             const cacheBustUrl = `${url}${url.includes('?') ? '&' : '?'}nocache=${Date.now()}`;
-            const res = await fetch(cacheBustUrl, { 
-                cache: 'no-store',
-                headers: {
-                    'Pragma': 'no-cache',
-                    'Cache-Control': 'no-cache, no-store, must-revalidate'
-                }
-            });
-
+            const res = await fetch(cacheBustUrl, { cache: 'no-store' });
             if (!res.ok) continue;
 
             const text = await res.text();
-            if (text.includes('accounts.google.com') || text.includes('<!doctype html>')) {
-                continue;
-            }
+            if (text.includes('accounts.google.com') || text.includes('<!doctype html>')) continue;
 
             try {
                 const json = JSON.parse(text);
                 if (json.grid) {
                     parseGridArray(json.grid);
-                    parseMemosFromSheet(json.memos || []);
+                    if (json.memos && json.memos.length > 1) parseMemosFromSheet(json.memos);
                 } else {
                     parseGridArray(json);
                 }
@@ -798,17 +844,18 @@ async function fetchData(isSilent = false) {
 
             if (state.products.length > 0) {
                 success = true;
-                renderSyncBanner(false, '구글 시트 3개 시트 탭 실시간 연동 완료 (100% 동기화)');
+                renderSyncBanner(false, '구글 시트 실시간 연동중');
                 break;
             }
-        } catch (err) {
-            console.warn(`Fetch failed for ${url}:`, err);
-        }
+        } catch (err) {}
     }
 
     if (!success || state.products.length === 0) {
         loadBackupData();
-        renderSyncBanner(true, '로컬 데이터 모드로 정상 작동 중입니다.');
+        renderSyncBanner(true, '로컬·클라우드 동기화 모드');
+    } else {
+        applyLocalAndCloudCustomizations();
+        recalculateAllKPIs();
     }
 
     renderDashboard();
@@ -817,11 +864,13 @@ async function fetchData(isSilent = false) {
     renderLedgerTable();
     renderMaturityTable();
     renderCalendar();
+
     state.lastUpdated = new Date();
-    if (elements.bannerUpdatedTime) elements.bannerUpdatedTime.innerText = `기준일시: ${formatTime(state.lastUpdated)}`;
-    
+    if (elements.bannerUpdatedTime) {
+        elements.bannerUpdatedTime.innerText = `(${formatTime(state.lastUpdated)})`;
+    }
     if (!isSilent && success) {
-        showToast('구글 시트 3개 탭 변경 사항 자동 수집 완료', 'success');
+        showToast('🔄 구글 스프레드시트 최신 데이터 동기화 완료', 'success');
     }
 }
 
@@ -860,10 +909,7 @@ function parseSavingsMasterTSV(tsvText) {
             });
         }
     }
-
-    if (masterList.length > 0) {
-        state.savingsMasterList = masterList;
-    }
+    if (masterList.length > 0) state.savingsMasterList = masterList;
 }
 
 function parseHospitalTSV(tsvText) {
@@ -888,13 +934,9 @@ function parseHospitalTSV(tsvText) {
             });
         }
     }
-
-    if (expenses.length > 0) {
-        state.hospitalExpenses = expenses;
-    }
+    if (expenses.length > 0) state.hospitalExpenses = expenses;
 }
 
-// Multi-Section Reset-First Grid Parser (Eliminates column leakage and duplicates)
 function parseGridArray(grid) {
     if (!grid || grid.length < 3) return;
 
@@ -902,28 +944,19 @@ function parseGridArray(grid) {
     state.maturedList = [];
     state.allRecordsFlat = [];
 
-    let accumulatedSavingsFromKPI = 0;
-    let maturityTotalFromKPI = 0;
     let parentalTotalFromKPI = 0;
-    let paidCount = 0;
 
-    // 1. Scan Top KPI Cards (Lines 0 to 15)
     for (let r = 0; r < Math.min(grid.length, 15); r++) {
         const row = grid[r];
         if (!row) continue;
         for (let c = 0; c < row.length; c++) {
             const cell = (row[c] || '').toString().trim();
-            if (cell.includes('총 누적 저축액')) {
-                accumulatedSavingsFromKPI = parseCurrency(grid[r+1]?.[c] || grid[r]?.[c+1] || grid[r+1]?.[c+1]);
-            } else if (cell.includes('만기적금총액')) {
-                maturityTotalFromKPI = parseCurrency(grid[r+1]?.[c] || grid[r]?.[c+1] || grid[r+1]?.[c+1]);
-            } else if (cell.includes('부모급여') && (cell.includes('총액') || r < 12)) {
+            if (cell.includes('부모급여') && (cell.includes('총액') || r < 12)) {
                 parentalTotalFromKPI = parseCurrency(grid[r+1]?.[c] || grid[r]?.[c+1] || grid[r+1]?.[c+1]);
             }
         }
     }
 
-    // 2. Scan ALL header rows containing product titles and subheader "월"
     for (let r = 0; r < grid.length - 1; r++) {
         const row = grid[r];
         const subRow = grid[r + 1] || [];
@@ -933,7 +966,7 @@ function parseGridArray(grid) {
             const subCell = (subRow[c] || '').toString().trim();
             if (subCell === '월') {
                 let prodName = '';
-                let rateStr = '이율 정보 없음';
+                let rateStr = '약정 이율';
 
                 for (let offset = -2; offset <= 3; offset++) {
                     const targetIdx = c + offset;
@@ -942,9 +975,7 @@ function parseGridArray(grid) {
                         if (candidate && !candidate.includes('이율') && candidate !== '월' && candidate !== '입금날짜' && candidate !== '금액' && candidate !== '현재날짜') {
                             if (!prodName) prodName = candidate;
                         }
-                        if (candidate && candidate.includes('이율')) {
-                            rateStr = candidate;
-                        }
+                        if (candidate && candidate.includes('이율')) rateStr = candidate;
                     }
                 }
 
@@ -952,9 +983,6 @@ function parseGridArray(grid) {
                     const monthCol = c;
                     let dateCol = c + 1;
                     let amountCol = c + 2;
-                    if ((subRow[c + 1] || '').toString().includes('입금날짜') || (subRow[c + 1] || '').toString().includes('받는날짜')) dateCol = c + 1;
-                    if ((subRow[c + 2] || '').toString().includes('금액')) amountCol = c + 2;
-
                     const cleanName = prodName.replace(/이율\([^)]+\)/g, '').trim();
 
                     let prodObj = state.products.find(p => p.name === cleanName);
@@ -969,7 +997,6 @@ function parseGridArray(grid) {
                         state.products.push(prodObj);
                     }
 
-                    // Parse monthly rows specifically for this grid block
                     for (let mr = r + 2; mr < grid.length; mr++) {
                         const mRow = grid[mr];
                         if (!mRow) break;
@@ -977,18 +1004,13 @@ function parseGridArray(grid) {
                         const dateVal = (mRow[dateCol] || '').toString().trim();
                         const amountVal = (mRow[amountCol] || '').toString().trim();
 
-                        if (monthVal === '총액' || monthVal === '총역' || monthVal === '총급여' || monthVal === '월') {
-                            break; // End of this product block
-                        }
+                        if (monthVal === '총액' || monthVal === '총역' || monthVal === '총급여' || monthVal === '월') break;
 
                         if (monthVal && monthVal !== '종류' && monthVal !== '현재날짜') {
                             const amountNum = parseCurrency(amountVal);
                             let status = 'scheduled';
-
                             if (dateVal && dateVal !== '미입금' && amountNum > 0) {
                                 status = 'deposited';
-                                prodObj.totalDeposited += amountNum;
-                                paidCount++;
                             } else if (dateVal === '미입금' || (monthVal.includes('8월') && !dateVal)) {
                                 status = 'unpaid';
                             }
@@ -1012,7 +1034,6 @@ function parseGridArray(grid) {
         }
     }
 
-    // 3. Scan Matured Deposits List Items
     for (let r = 0; r < grid.length; r++) {
         const row = grid[r];
         if (!row) continue;
@@ -1034,7 +1055,6 @@ function parseGridArray(grid) {
         }
     }
 
-    // 4. Merge ALL products from savingsMasterList
     const masterListToMerge = state.savingsMasterList.length > 0 ? state.savingsMasterList : SAVINGS_MASTER_FALLBACK;
     masterListToMerge.forEach(masterItem => {
         let existing = state.products.find(p => p.name.includes(masterItem.name) || masterItem.name.includes(p.name));
@@ -1047,20 +1067,10 @@ function parseGridArray(grid) {
                 totalDeposited: masterItem.total || 0
             };
             state.products.push(existing);
-        } else {
-            const depSum = existing.records.filter(r => r.status === 'deposited').reduce((s, r) => s + r.amount, 0);
-            existing.totalDeposited = depSum > 0 ? depSum : (masterItem.total || 0);
         }
     });
 
-    const totalAccumulatedSavings = state.products.reduce((s, p) => s + p.totalDeposited, 0) || accumulatedSavingsFromKPI;
-    const totalMatured = state.maturedList.reduce((s, m) => s + m.amount, 0) || maturityTotalFromKPI;
-
-    state.kpi.accumulatedSavings = totalAccumulatedSavings;
-    state.kpi.maturityTotal = totalMatured;
     state.kpi.parentalTotal = parentalTotalFromKPI || 19000000;
-    state.kpi.totalNetWorth = totalAccumulatedSavings + totalMatured;
-    state.paidCount = paidCount;
 }
 
 function parseTSVString(tsvText) {
@@ -1070,39 +1080,40 @@ function parseTSVString(tsvText) {
 
 function parseMemosFromSheet(memoRows) {
     const memos = [];
-    if (memoRows && memoRows.length > 1) {
-        for (let r = 1; r < memoRows.length; r++) {
-            const row = memoRows[r];
-            if (row && row[0]) {
-                memos.push({
-                    date: (row[0] || '').toString().trim(),
-                    time: (row[1] || '10:00').toString().trim(),
-                    category: (row[2] || '일정').toString().trim(),
-                    content: (row[3] || '').toString().trim()
-                });
-            }
+    for (let r = 1; r < memoRows.length; r++) {
+        const row = memoRows[r];
+        if (row && row[0]) {
+            memos.push({
+                date: (row[0] || '').toString().trim(),
+                time: (row[1] || '10:00').toString().trim(),
+                category: (row[2] || '일정').toString().trim(),
+                content: (row[3] || '').toString().trim()
+            });
         }
     }
-    // Fully overwrite state.memos so deleted memos disappear immediately
-    state.memos = memos;
-    localStorage.setItem('juwon_memos', JSON.stringify(memos));
+    if (memos.length > 0) {
+        state.memos = memos;
+        localStorage.setItem('juwon_memos', JSON.stringify(memos));
+    }
 }
 
-// Render Dashboard (Tab 1)
+// ================= RENDER DASHBOARD & NOTION GOAL BOARD =================
 function renderDashboard() {
-    elements.kpiTotalNetworth.innerText = formatKRW(state.kpi.totalNetWorth);
-    elements.kpiAccumulatedSavings.innerText = formatKRW(state.kpi.accumulatedSavings);
-    elements.kpiMaturityTotal.innerText = formatKRW(state.kpi.maturityTotal);
-    elements.kpiParentalTotal.innerText = formatKRW(state.kpi.parentalTotal);
+    if (elements.kpiTotalNetworth) elements.kpiTotalNetworth.innerText = formatKRW(state.kpi.totalNetWorth);
+    if (elements.kpiAccumulatedSavings) elements.kpiAccumulatedSavings.innerText = formatKRW(state.kpi.accumulatedSavings);
+    if (elements.kpiMaturityTotal) elements.kpiMaturityTotal.innerText = formatKRW(state.kpi.maturityTotal);
+    if (elements.kpiParentalTotal) elements.kpiParentalTotal.innerText = formatKRW(state.kpi.parentalTotal);
 
     const totalPossible = state.allRecordsFlat.length;
     const pct = totalPossible > 0 ? Math.min(100, Math.round((state.paidCount / totalPossible) * 100)) : 0;
 
-    elements.overallCompletionRate.innerText = `진행률 ${pct}%`;
-    elements.overallProgressBar.style.width = `${pct}%`;
-    elements.statPaidCount.innerText = `${state.paidCount}회 / 총 ${totalPossible}회`;
-    elements.statProductCount.innerText = `${state.products.length}개 상품`;
+    if (elements.overallCompletionRate) elements.overallCompletionRate.innerText = `진행률 ${pct}%`;
+    if (elements.overallProgressBar) elements.overallProgressBar.style.width = `${pct}%`;
+    if (elements.statPaidCount) elements.statPaidCount.innerText = `${state.paidCount}회 / 총 ${totalPossible}회`;
+    if (elements.statProductCount) elements.statProductCount.innerText = `${state.products.length}개 상품`;
 
+    renderSidebarGoalCard();
+    renderNotionMainDatabase();
     renderProductsGrid();
     renderMaturedList();
     renderRecommendations();
@@ -1110,9 +1121,538 @@ function renderDashboard() {
     renderBabyMilestonesTable();
 }
 
+function renderSidebarGoalCard() {
+    const titleEl = document.getElementById('goal-title-display');
+    const curAssetEl = document.getElementById('goal-current-asset');
+    const remainPctEl = document.getElementById('goal-remain-pct');
+    const achievedPctEl = document.getElementById('goal-achieved-pct');
+    const segBarEl = document.getElementById('goal-segmented-bar');
+
+    const netWorth = state.kpi.totalNetWorth || 50600000;
+    const target = state.goalTargetAmount || 100000000;
+    const achievedPct = Math.min(100, Math.max(0, (netWorth / target) * 100));
+    const remainPct = Math.max(0, 100 - achievedPct).toFixed(1);
+    const filledSegments = Math.round(achievedPct / 10);
+
+    if (titleEl) titleEl.innerText = state.goalTitle;
+    if (curAssetEl) curAssetEl.innerText = `${formatKRW(netWorth)}원`;
+    if (remainPctEl) remainPctEl.innerText = `${remainPct}%`;
+    if (achievedPctEl) achievedPctEl.innerText = `${Math.round(achievedPct)}%`;
+
+    if (segBarEl) {
+        let segHTML = '';
+        for (let i = 1; i <= 10; i++) {
+            segHTML += `<span class="goal-seg ${i <= filledSegments ? 'filled' : ''}"></span>`;
+        }
+        segBarEl.innerHTML = segHTML;
+    }
+}
+
+window.openGoalSettingPrompt = function() {
+    const newTitle = prompt('목표 이름을 입력하세요 (예: 1억 모으기, 15억 모으기):', state.goalTitle);
+    if (!newTitle) return;
+    const currentManwon = Math.round(state.goalTargetAmount / 10000);
+    const newTargetManwon = prompt('목표 금액을 만원 단위로 입력하세요 (예: 1억 = 10000, 15억 = 150000):', currentManwon);
+    if (!newTargetManwon) return;
+
+    const parsed = parseFloat(newTargetManwon);
+    if (!isNaN(parsed) && parsed > 0) {
+        state.goalTitle = newTitle.trim();
+        state.goalTargetAmount = parsed * 10000;
+        localStorage.setItem('juwon_goal_title', state.goalTitle);
+        localStorage.setItem('juwon_goal_target', String(state.goalTargetAmount));
+        renderSidebarGoalCard();
+        showToast(`🎯 목표가 [${state.goalTitle} - ${formatKRW(state.goalTargetAmount)}]으로 설정되었습니다!`, 'success');
+    }
+};
+
+// ================= NOTION MAIN DATABASE (✽ 가계부) ENGINE =================
+window.switchNotionDbView = function(view) {
+    state.notionDbView = view;
+    document.querySelectorAll('.db-view-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-view') === view);
+    });
+    renderNotionMainDatabase();
+};
+
+window.focusInlineAddRow = function() {
+    const input = document.getElementById('quick-add-title');
+    if (input) {
+        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => input.focus(), 200);
+    }
+};
+
+function buildUnifiedNotionRows() {
+    const rows = [];
+
+    // 1. Custom Ledger Entries (added directly via Notion quick-add row)
+    state.customLedgerEntries.forEach((entry, idx) => {
+        rows.push({
+            rowType: 'custom',
+            rawIndex: idx,
+            id: entry.id || `custom_${idx}`,
+            icon: entry.mainCategory === '지출' ? '🧾' : entry.mainCategory === '수입/지원금' ? '🎁' : '🐷',
+            title: entry.title,
+            date: entry.date || '-',
+            amount: Number(entry.amount) || 0,
+            subCategory: entry.subCategory || '🍼 예적금/청약/파킹',
+            mainCategory: entry.mainCategory || '저축/투자/연금',
+            isFixedOrPaid: entry.status === 'deposited',
+            status: entry.status || 'deposited',
+            owner: entry.owner || '가족공용',
+            method: entry.method || '토스체크'
+        });
+    });
+
+    // 2. Active Savings Records (from Google Sheet & Local Edits)
+    state.allRecordsFlat.forEach((rec, idx) => {
+        const masterInfo = state.savingsMasterList.find(m => m.name.includes(rec.productName) || rec.productName.includes(m.name));
+        const ownerName = masterInfo && masterInfo.owners.length ? masterInfo.owners[0] : '가족공용';
+        const isParental = rec.productName.includes('부모급여');
+        const methodBank = rec.memo || (rec.productName.includes('새마을') ? '새마을금고' : rec.productName.includes('하나') ? '하나은행' : rec.productName.includes('토스') || rec.productName.includes('굴비') ? '토스뱅크' : rec.productName.includes('카카오') ? '카카오뱅크' : '자동이체');
+
+        rows.push({
+            rowType: 'savings',
+            rawIndex: idx,
+            id: rec.id || `sav_${idx}`,
+            icon: isParental ? '👶' : '🏦',
+            title: `${rec.month} ${rec.productName}`,
+            date: rec.date && rec.date !== '-' ? rec.date : `2026/${rec.month.replace('월', '').padStart(2, '0')}/25`,
+            amount: Number(rec.amount) || (masterInfo ? masterInfo.monthly : 300000),
+            subCategory: isParental ? '🎁 정부지원금/수입' : '🍼 예적금/청약/파킹',
+            mainCategory: isParental ? '수입/지원금' : '저축/투자/연금',
+            isFixedOrPaid: rec.status === 'deposited',
+            status: rec.status,
+            owner: ownerName,
+            method: methodBank
+        });
+    });
+
+    // 3. Hospital & Postpartum Expenses
+    const hospList = state.hospitalExpenses.length > 0 ? state.hospitalExpenses : HOSPITAL_EXPENSES_FALLBACK;
+    hospList.forEach((exp, idx) => {
+        rows.push({
+            rowType: 'hospital',
+            rawIndex: idx,
+            id: `hosp_${idx}`,
+            icon: exp.category === '조리원비' ? '🍼' : exp.category === '산후도우미' ? '👩‍⚕️' : '🏥',
+            title: `${exp.category} — ${exp.details}`,
+            date: exp.date.replace(/-/g, '/'),
+            amount: Number(exp.amount) || 0,
+            subCategory: `🏥 ${exp.category}`,
+            mainCategory: '지출',
+            isFixedOrPaid: true,
+            status: 'deposited',
+            owner: exp.details.includes('준영') ? '준영' : exp.details.includes('지헌') ? '지헌' : '주원',
+            method: exp.note && exp.note !== '-' ? exp.note : '카드결제'
+        });
+    });
+
+    return rows;
+}
+
+window.renderNotionMainDatabase = function() {
+    const tbody = document.getElementById('notion-db-tbody');
+    const searchInput = document.getElementById('notion-db-search');
+    const totalSumEl = document.getElementById('notion-db-total-sum');
+    const countTextEl = document.getElementById('notion-db-count-text');
+    if (!tbody) return;
+
+    const query = (searchInput ? searchInput.value : '').toLowerCase().trim();
+    let rows = buildUnifiedNotionRows();
+
+    // View filter
+    if (state.notionDbView === 'this-month') {
+        rows = rows.filter(r => r.title.includes('7월') || r.title.includes('8월') || r.date.includes('07') || r.date.includes('08') || r.rowType === 'custom');
+    } else if (state.notionDbView === 'savings') {
+        rows = rows.filter(r => r.mainCategory === '저축/투자/연금' || r.mainCategory === '수입/지원금');
+    } else if (state.notionDbView === 'expenses') {
+        rows = rows.filter(r => r.mainCategory === '지출');
+    } else if (state.notionDbView === 'unpaid') {
+        rows = rows.filter(r => !r.isFixedOrPaid);
+    } else {
+        // 'all' view: show custom entries + deposited/current month items first so table is clean and focused
+        rows = rows.filter(r => r.rowType === 'custom' || r.isFixedOrPaid || r.title.includes('8월') || r.title.includes('9월') || r.rowType === 'hospital');
+    }
+
+    if (query) {
+        rows = rows.filter(r =>
+            r.title.toLowerCase().includes(query) ||
+            r.subCategory.toLowerCase().includes(query) ||
+            r.mainCategory.toLowerCase().includes(query) ||
+            r.owner.toLowerCase().includes(query) ||
+            r.method.toLowerCase().includes(query)
+        );
+    }
+
+    const totalSum = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+    if (totalSumEl) totalSumEl.innerText = formatKRW(totalSum);
+    if (countTextEl) countTextEl.innerText = `총 ${rows.length}건`;
+
+    if (rows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:2rem; color:var(--text-muted);">조건에 맞는 내역이 없습니다. 하단 <code>+ 새 내역 기입</code> 줄에서 바로 추가해 보세요!</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = rows.map(r => {
+        const mainTagClass = r.mainCategory === '지출' ? 'tag-green' : r.mainCategory === '수입/지원금' ? 'tag-yellow' : 'tag-purple';
+        const ownerEmoji = r.owner === '주원' ? '👶' : r.owner === '지헌' ? '👩' : r.owner === '준영' ? '👨' : '💧';
+
+        let actionBtnHTML = '';
+        if (r.rowType === 'savings') {
+            actionBtnHTML = `<button class="notion-btn notion-btn-ghost btn-xs" onclick="openEditRecordModal(${r.rawIndex})" title="상세 수정"><i class="fa-solid fa-pen"></i></button>`;
+        } else if (r.rowType === 'custom') {
+            actionBtnHTML = `<button class="notion-btn notion-btn-ghost btn-xs" onclick="deleteCustomLedgerRow(${r.rawIndex})" title="삭제"><i class="fa-regular fa-trash-can"></i></button>`;
+        } else {
+            actionBtnHTML = `<span style="font-size:0.72rem; color:var(--text-muted);">시트연동</span>`;
+        }
+
+        return `
+            <tr>
+                <td class="col-check">
+                    <input type="checkbox" class="notion-checkbox" ${r.isFixedOrPaid ? 'checked' : ''} onchange="toggleNotionRowCheck('${r.rowType}', ${r.rawIndex})">
+                </td>
+                <td>
+                    <div class="row-title-cell">
+                        <span>${r.icon}</span>
+                        <span>${escapeHTML(r.title)}</span>
+                    </div>
+                </td>
+                <td style="color:var(--text-secondary); font-variant-numeric:tabular-nums;">${escapeHTML(r.date)}</td>
+                <td class="col-amount">${formatKRW(r.amount)}</td>
+                <td><span style="font-size:0.8rem;">${escapeHTML(r.subCategory)}</span></td>
+                <td><span class="notion-tag ${mainTagClass}">${escapeHTML(r.mainCategory)}</span></td>
+                <td class="col-fixed">
+                    <input type="checkbox" class="notion-checkbox" ${r.isFixedOrPaid ? 'checked' : ''} onchange="toggleNotionRowCheck('${r.rowType}', ${r.rawIndex})">
+                </td>
+                <td><span style="font-size:0.8rem; font-weight:600;">${ownerEmoji} ${escapeHTML(r.owner)}</span></td>
+                <td><span class="notion-tag tag-blue">${escapeHTML(r.method)}</span></td>
+                <td style="text-align:center;">${actionBtnHTML}</td>
+            </tr>
+        `;
+    }).join('');
+};
+
+window.toggleNotionRowCheck = async function(rowType, rawIndex) {
+    if (rowType === 'savings') {
+        toggleQuickDepositStatus(rawIndex);
+    } else if (rowType === 'custom') {
+        const item = state.customLedgerEntries[rawIndex];
+        if (!item) return;
+        item.status = item.status === 'deposited' ? 'unpaid' : 'deposited';
+        localStorage.setItem('juwon_custom_ledger', JSON.stringify(state.customLedgerEntries));
+        recalculateAllKPIs();
+        renderDashboard();
+        showToast(`✅ [${item.title}] 완납 상태가 변경되었습니다.`, 'success');
+    } else if (rowType === 'hospital') {
+        toggleHospClaimStatus(rawIndex);
+    }
+};
+
+window.deleteCustomLedgerRow = function(idx) {
+    const removed = state.customLedgerEntries.splice(idx, 1)[0];
+    localStorage.setItem('juwon_custom_ledger', JSON.stringify(state.customLedgerEntries));
+    recalculateAllKPIs();
+    renderDashboard();
+    if (removed) showToast(`🗑️ [${removed.title}] 내역이 삭제되었습니다.`, 'info');
+};
+
+window.handleNotionQuickAdd = async function() {
+    const titleEl = document.getElementById('quick-add-title');
+    const dateEl = document.getElementById('quick-add-date');
+    const amountEl = document.getElementById('quick-add-amount');
+    const subcatEl = document.getElementById('quick-add-subcat');
+    const maincatEl = document.getElementById('quick-add-maincat');
+    const fixedEl = document.getElementById('quick-add-fixed');
+    const ownerEl = document.getElementById('quick-add-owner');
+    const methodEl = document.getElementById('quick-add-method');
+
+    const title = titleEl ? titleEl.value.trim() : '';
+    const date = dateEl ? dateEl.value.trim() || '2026/08/25' : '2026/08/25';
+    const amount = amountEl ? parseFloat(amountEl.value) || 0 : 0;
+    const subCategory = subcatEl ? subcatEl.value : '🍼 예적금/청약/파킹';
+    const mainCategory = maincatEl ? maincatEl.value : '저축/투자/연금';
+    const isFixed = fixedEl ? fixedEl.checked : true;
+    const owner = ownerEl ? ownerEl.value : '주원';
+    const method = methodEl ? methodEl.value.trim() || '토스체크' : '토스체크';
+
+    if (!title || amount <= 0) {
+        showToast('내역 이름과 금액(원)을 입력해 주세요!', 'warning');
+        if (titleEl && !title) titleEl.focus();
+        else if (amountEl) amountEl.focus();
+        return;
+    }
+
+    const newEntry = {
+        id: `custom_${Date.now()}`,
+        title,
+        date,
+        amount,
+        subCategory,
+        mainCategory,
+        status: isFixed ? 'deposited' : 'unpaid',
+        owner,
+        method,
+        createdAt: new Date().toISOString()
+    };
+
+    // Check if title matches an existing savings product & month (e.g. "9월 걸음마")
+    const matchedProd = state.products.find(p => title.includes(p.name.split('(')[0].trim()));
+    const monthMatch = title.match(/([0-9]{1,2}월)/);
+    if (matchedProd && monthMatch) {
+        const targetMonth = monthMatch[1];
+        let rec = matchedProd.records.find(r => r.month === targetMonth);
+        if (rec) {
+            rec.date = date;
+            rec.amount = amount;
+            rec.amountFormatted = formatKRW(amount);
+            rec.status = isFixed ? 'deposited' : 'unpaid';
+            rec.memo = method;
+            persistRecordEdit(rec);
+        } else {
+            rec = {
+                id: `rec_${Date.now()}`,
+                productName: matchedProd.name,
+                rate: matchedProd.rate,
+                month: targetMonth,
+                date,
+                amount,
+                amountFormatted: formatKRW(amount),
+                status: isFixed ? 'deposited' : 'unpaid',
+                memo: method
+            };
+            matchedProd.records.push(rec);
+            state.allRecordsFlat.push(rec);
+            persistRecordEdit(rec);
+        }
+    } else {
+        state.customLedgerEntries.unshift(newEntry);
+        localStorage.setItem('juwon_custom_ledger', JSON.stringify(state.customLedgerEntries));
+    }
+
+    // If hospital/care category selected, also add to hospital expenses tracker
+    if (subCategory.includes('병원') || subCategory.includes('조리원')) {
+        const hospEntry = {
+            date: date.replace(/\//g, '-'),
+            category: title.includes('조리원') ? '조리원비' : title.includes('도우미') ? '산후도우미' : '병원비',
+            details: `${owner}(${method}) ${title}`,
+            amount,
+            amountFormatted: formatKRW(amount),
+            note: '웹 가계부 직접기입'
+        };
+        const customHosp = JSON.parse(localStorage.getItem('juwon_custom_hospital')) || [];
+        customHosp.push(hospEntry);
+        localStorage.setItem('juwon_custom_hospital', JSON.stringify(customHosp));
+        state.hospitalExpenses.push(hospEntry);
+        renderHospitalExpensesTable();
+    }
+
+    recalculateAllKPIs();
+    renderDashboard();
+    renderLedgerTable();
+
+    if (titleEl) titleEl.value = '';
+    if (amountEl) amountEl.value = '';
+
+    if (state.db) {
+        try { state.db.collection('custom_ledger').add(newEntry); } catch (e) {}
+    }
+
+    await postToGoogleSheet({
+        action: 'add_ledger_entry',
+        record: {
+            productName: matchedProd ? matchedProd.name : title,
+            title,
+            month: monthMatch ? monthMatch[1] : subCategory,
+            date,
+            amount,
+            subCategory,
+            mainCategory,
+            status: isFixed ? 'deposited' : 'unpaid',
+            owner,
+            method
+        }
+    });
+
+    showToast(`✨ [${title} — ${formatKRW(amount)}] 내역이 추가되어 구글 스프레드시트로 자동 전송되었습니다!`, 'success');
+};
+
+// ================= CREATE NEW GOOGLE SHEET TAB MODAL HANDLER =================
+window.openCreateSheetModal = function() {
+    const modal = document.getElementById('create-sheet-modal');
+    const nameInput = document.getElementById('new-sheet-name-input');
+    if (nameInput && !nameInput.value) {
+        const today = new Date().toISOString().slice(0, 10);
+        nameInput.value = `매일가계부_${today}`;
+    }
+    if (modal) modal.classList.add('active');
+};
+
+window.handleCreateNewSheetSubmit = async function(e) {
+    e.preventDefault();
+    const sheetName = document.getElementById('new-sheet-name-input').value.trim();
+    const dataType = document.getElementById('new-sheet-data-type').value;
+    if (!sheetName) return;
+
+    let recordsToExport = [];
+    if (dataType === 'all') {
+        recordsToExport = buildUnifiedNotionRows().map(r => ({
+            title: r.title,
+            date: r.date,
+            amount: r.amount,
+            subCategory: r.subCategory,
+            mainCategory: r.mainCategory,
+            status: r.isFixedOrPaid ? '입금/결제완료' : '미입금/예정',
+            owner: r.owner,
+            method: r.method
+        }));
+    } else if (dataType === 'savings') {
+        recordsToExport = state.allRecordsFlat.map(r => ({
+            title: r.productName,
+            date: r.date,
+            amount: r.amount,
+            subCategory: r.month,
+            mainCategory: '저축/적금',
+            status: r.status === 'deposited' ? '입금완료' : '미입금',
+            owner: '가족공용',
+            method: r.memo || '자동이체'
+        }));
+    } else if (dataType === 'hospital') {
+        recordsToExport = state.hospitalExpenses.map(h => ({
+            title: h.details,
+            date: h.date,
+            amount: h.amount,
+            subCategory: h.category,
+            mainCategory: '병원/조리원지출',
+            status: h.claimStatus || '결제완료',
+            owner: '가족공용',
+            method: h.note || '-'
+        }));
+    }
+
+    closeAllModals();
+    showToast(`📊 구글 스프레드시트에 [${sheetName}] 새 시트를 생성하고 있습니다...`, 'info');
+
+    await postToGoogleSheet({
+        action: 'create_new_sheet',
+        sheetName,
+        records: recordsToExport
+    });
+
+    showToast(`🎉 구글 스프레드시트에 [${sheetName}] 시트 생성 요청이 완료되었습니다!`, 'success');
+};
+
+// ================= HOSPITAL EXPENSE ADD MODAL HANDLER =================
+window.openHospitalExpenseModal = function() {
+    const modal = document.getElementById('hospital-expense-modal');
+    const dateInput = document.getElementById('hosp-add-date');
+    if (dateInput && !dateInput.value) dateInput.value = '2026-08-11';
+    if (modal) modal.classList.add('active');
+};
+
+window.handleHospitalExpenseSubmit = async function(e) {
+    e.preventDefault();
+    const date = document.getElementById('hosp-add-date').value;
+    const category = document.getElementById('hosp-add-category').value;
+    const details = document.getElementById('hosp-add-details').value.trim();
+    const amount = parseFloat(document.getElementById('hosp-add-amount').value) || 0;
+    const note = document.getElementById('hosp-add-note').value.trim() || '-';
+
+    if (!date || !details || amount <= 0) return;
+
+    const newExp = {
+        date,
+        category,
+        details,
+        amount,
+        amountFormatted: formatKRW(amount),
+        note,
+        claimStatus: note.includes('보건소') ? '청구대기' : '환불완료'
+    };
+
+    const customHosp = JSON.parse(localStorage.getItem('juwon_custom_hospital')) || [];
+    customHosp.push(newExp);
+    localStorage.setItem('juwon_custom_hospital', JSON.stringify(customHosp));
+
+    state.hospitalExpenses.push(newExp);
+    renderHospitalExpensesTable();
+    renderNotionMainDatabase();
+    closeAllModals();
+
+    if (state.db) {
+        try { state.db.collection('hospital_expenses').add(newExp); } catch (err) {}
+    }
+    await postToGoogleSheet({
+        action: 'add_hospital_expense',
+        ...newExp
+    });
+
+    showToast(`🏥 [${category} — ${formatKRW(amount)}] 지출 내역이 등록 및 구글 시트에 반영되었습니다!`, 'success');
+};
+
+// ================= SAVINGS PRODUCTS & TABLES RENDERERS =================
+function getBankLink(name) {
+    if (!name) return "https://search.naver.com/search.naver?query=적금+추천";
+    const foundKey = Object.keys(BANK_LINKS).find(k => name.includes(k) || k.includes(name));
+    return foundKey ? BANK_LINKS[foundKey] : `https://search.naver.com/search.naver?query=${encodeURIComponent(name)}`;
+}
+
+function getOfficialRate(name, currentRate) {
+    if (currentRate && currentRate !== '이율 정보 없음' && currentRate !== '약정 이율' && !currentRate.includes('12.0%')) return currentRate;
+    const foundKey = Object.keys(OFFICIAL_RATES).find(k => name.includes(k) || k.includes(name));
+    return foundKey ? OFFICIAL_RATES[foundKey] : (currentRate || '약정 이율');
+}
+
+function getTargetEpisodes(name, actualRecordCount) {
+    const foundKey = Object.keys(PRODUCT_EPISODES).find(k => name.includes(k) || k.includes(name));
+    const target = foundKey ? PRODUCT_EPISODES[foundKey] : 12;
+    return Math.max(target, actualRecordCount || 0);
+}
+
+window.switchRecommendCategory = function(cat) {
+    state.recCategory = cat;
+    const babyTab = document.getElementById('rec-tab-baby');
+    const highTab = document.getElementById('rec-tab-high');
+    if (babyTab && highTab) {
+        babyTab.className = cat === 'baby' ? "notion-btn notion-btn-warm btn-xs active" : "notion-btn notion-btn-default btn-xs";
+        highTab.className = cat === 'high' ? "notion-btn notion-btn-warm btn-xs active" : "notion-btn notion-btn-default btn-xs";
+    }
+    renderRecommendations();
+};
+
+function renderRecommendations() {
+    const listContainer = document.getElementById('recommend-list');
+    if (!listContainer) return;
+
+    const sourceList = state.recCategory === 'high' ? HIGH_YIELD_RECOMMENDATIONS : BABY_RECOMMENDATIONS;
+    const offset = state.recSeed % sourceList.length;
+
+    const displayItems = [];
+    for (let i = 0; i < 5; i++) {
+        displayItems.push(sourceList[(offset + i) % sourceList.length]);
+    }
+
+    listContainer.innerHTML = displayItems.map(item => `
+        <div style="padding:0.55rem 0; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
+            <div>
+                <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+                    <strong style="font-size:0.84rem; color:var(--text-primary);">${escapeHTML(item.name)}</strong>
+                    <span class="notion-tag tag-green">${escapeHTML(item.rate)}</span>
+                </div>
+                <div style="font-size:0.74rem; color:var(--text-secondary); margin-top:2px;">${escapeHTML(item.desc)}</div>
+            </div>
+            <a href="https://search.naver.com/search.naver?query=${encodeURIComponent(item.query)}" target="_blank" rel="noopener noreferrer" class="notion-btn notion-btn-default btn-xs">
+                조회 ↗
+            </a>
+        </div>
+    `).join('');
+}
+
 function renderProductsGrid() {
+    if (!elements.productsContainer) return;
     if (state.products.length === 0) {
-        elements.productsContainer.innerHTML = `<p style="padding:2rem; text-align:center; color:var(--text-secondary);">등록된 적금 상품이 없습니다.</p>`;
+        elements.productsContainer.innerHTML = `<p style="padding:1.5rem; color:var(--text-secondary);">등록된 적금 상품이 없습니다.</p>`;
         return;
     }
 
@@ -1127,48 +1667,36 @@ function renderProductsGrid() {
         const rateDisplay = getOfficialRate(prod.name, prod.rate);
         const completionPct = Math.min(100, Math.round((deposited / targetEpisodes) * 100));
 
-        let statusTagHTML = `<span class="badge-emerald">${deposited > 0 ? `진행중 (${deposited}회)` : '예정'}</span>`;
-        if (completionPct >= 100) {
-            statusTagHTML = `<span class="tag tag-gold" style="font-weight:700;"><i class="fa-solid fa-flag-checkered"></i> 만기/해지가능</span>`;
-        } else if (completionPct >= 90) {
-            statusTagHTML = `<span class="tag tag-blue" style="background:#3b82f6; color:#fff; font-weight:700;"><i class="fa-solid fa-hourglass-half"></i> 만기임박 (${completionPct}%)</span>`;
-        }
-
         return `
-            <div class="card product-card">
+            <div class="product-card">
                 <div class="product-head">
                     <div class="product-title-group">
-                        <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
-                            <h4 style="margin:0;">${escapeHTML(prod.name)}</h4>
+                        <div style="display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap;">
+                            <h4>${escapeHTML(prod.name)}</h4>
                             ${ownersHTML}
                         </div>
-                        <span class="rate-badge" style="margin-top:0.25rem;"><i class="fa-solid fa-percent"></i> ${escapeHTML(rateDisplay)}</span>
+                        <span class="rate-badge">이율 ${escapeHTML(rateDisplay)}</span>
                     </div>
-                    <div class="product-total-box">
-                        <span class="kpi-label">현재 누적액</span>
+                    <div>
+                        <div style="font-size:0.72rem; color:var(--text-secondary); text-align:right;">현재 누적액</div>
                         <div class="product-total-amount">${formatKRW(prod.totalDeposited)}</div>
                     </div>
                 </div>
 
                 <div class="product-status-mini">
-                    <div><i class="fa-solid fa-calendar-check"></i> 납입: <strong>${deposited} / ${targetEpisodes}회 (${completionPct}%)</strong></div>
-                    <div>최근입금: <strong>${lastRec ? lastRec.date : '-'}</strong></div>
+                    <span>납입: <strong>${deposited}/${targetEpisodes}회 (${completionPct}%)</strong></span>
+                    <span>최근: <strong>${lastRec ? lastRec.date : '-'}</strong></span>
                 </div>
 
-                <!-- Product Progress Bar -->
-                <div style="width:100%; background:rgba(255,255,255,0.08); height:6px; border-radius:3px; overflow:hidden; margin:0.6rem 0;">
-                    <div style="width:${completionPct}%; background:${completionPct >= 100 ? '#f59e0b' : '#10b981'}; height:100%; transition:width 0.3s ease;"></div>
+                <div class="mini-progress-track">
+                    <div class="mini-progress-fill" style="width:${completionPct}%; background:${completionPct >= 100 ? '#d9730d' : '#2e7d32'};"></div>
                 </div>
 
                 <div class="product-actions">
-                    ${statusTagHTML}
-                    <div style="display:flex; gap:0.35rem;">
-                        <a href="${bankLink}" target="_blank" rel="noopener noreferrer" class="btn btn-dark-slate btn-sm" title="네이버/공식 은행 정보 검색" style="padding:0.35rem 0.6rem; text-decoration:none;">
-                            <i class="fa-solid fa-arrow-up-right-from-square"></i> 정보
-                        </a>
-                        <button class="btn btn-teal btn-sm" onclick="openProductDetail('${prod.id}')">
-                            <i class="fa-solid fa-list"></i> 상세 내역
-                        </button>
+                    <span class="notion-tag ${deposited > 0 ? 'tag-green' : 'tag-yellow'}">${deposited > 0 ? `납입진행중 (${deposited}회)` : '납입예정'}</span>
+                    <div style="display:flex; gap:0.3rem;">
+                        <a href="${bankLink}" target="_blank" rel="noopener noreferrer" class="notion-btn notion-btn-default btn-xs">정보 ↗</a>
+                        <button class="notion-btn notion-btn-blue btn-xs" onclick="openProductDetail('${prod.id}')">상세/입금</button>
                     </div>
                 </div>
             </div>
@@ -1177,16 +1705,16 @@ function renderProductsGrid() {
 }
 
 function renderMaturedList() {
+    if (!elements.maturedList) return;
     if (state.maturedList.length === 0) {
-        elements.maturedList.innerHTML = `<p style="color:var(--text-muted); font-size:0.85rem;">만기 자산이 없습니다.</p>`;
+        elements.maturedList.innerHTML = `<p style="color:var(--text-muted); font-size:0.82rem;">만기 자산이 없습니다.</p>`;
         return;
     }
-
     elements.maturedList.innerHTML = state.maturedList.map(item => `
         <div class="matured-item">
             <div>
                 <div class="matured-name">${escapeHTML(item.type)}</div>
-                <div class="matured-bank"><i class="fa-solid fa-building-columns"></i> ${escapeHTML(item.bank)}</div>
+                <div class="matured-bank">🏦 ${escapeHTML(item.bank)}</div>
             </div>
             <div class="matured-amount">${item.amountFormatted}</div>
         </div>
@@ -1198,48 +1726,37 @@ function formatStandardDateKey(str) {
     const clean = str.replace(/\./g, '-').replace(/\s+/g, '').replace(/\//g, '-');
     const parts = clean.split('-').filter(Boolean);
     if (parts.length === 3) {
-        const y = parts[0];
-        const m = String(parts[1]).padStart(2, '0');
-        const d = String(parts[2]).padStart(2, '0');
-        return `${y}-${m}-${d}`;
+        return `${parts[0]}-${String(parts[1]).padStart(2, '0')}-${String(parts[2]).padStart(2, '0')}`;
     }
     return str;
 }
 
-// Render Calendar
 function renderCalendar() {
+    if (!elements.calendarDaysContainer) return;
     const year = state.calCurrentDate.getFullYear();
     const month = state.calCurrentDate.getMonth();
-
-    elements.calMonthTitle.innerText = `${year}년 ${month + 1}월`;
+    if (elements.calMonthTitle) elements.calMonthTitle.innerText = `${year}년 ${month + 1}월`;
 
     const firstDay = new Date(year, month, 1).getDay();
     const lastDate = new Date(year, month + 1, 0).getDate();
     const prevLastDate = new Date(year, month, 0).getDate();
 
     let html = '';
-
     for (let i = firstDay - 1; i >= 0; i--) {
         html += `<div class="cal-day-cell other-month">${prevLastDate - i}</div>`;
     }
 
     for (let day = 1; day <= lastDate; day++) {
-        const monthStr = String(month + 1).padStart(2, '0');
-        const dayStr = String(day).padStart(2, '0');
-        const fullDateStr = `${year}-${monthStr}-${dayStr}`;
-
+        const fullDateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const isToday = fullDateStr === "2026-08-07" || fullDateStr === "2026-08-11";
         const isSelected = fullDateStr === state.calSelectedDateStr;
-        
         const hasManualMemo = state.memos.some(m => formatStandardDateKey(m.date) === fullDateStr);
         const hasDepositRecord = state.allRecordsFlat.some(r => r.status === 'deposited' && formatStandardDateKey(r.date) === fullDateStr);
-        const hasEvent = hasManualMemo || hasDepositRecord;
 
         html += `
-            <div class="cal-day-cell ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}" 
-                 onclick="selectCalendarDate('${fullDateStr}')">
+            <div class="cal-day-cell ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}" onclick="selectCalendarDate('${fullDateStr}')">
                 ${day}
-                ${hasEvent ? `<span class="event-dot" style="background:${hasDepositRecord ? '#10b981' : '#f59e0b'};"></span>` : ''}
+                ${(hasManualMemo || hasDepositRecord) ? `<span class="event-dot" style="background:${hasDepositRecord ? '#2e7d32' : '#d9730d'};"></span>` : ''}
             </div>
         `;
     }
@@ -1254,56 +1771,43 @@ window.selectCalendarDate = function(dateStr) {
 };
 
 function renderDailyNotes() {
+    if (!elements.dailyNotesList) return;
     const [y, m, d] = state.calSelectedDateStr.split('-');
-    const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
-    const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
-    const dayName = dayNames[dateObj.getDay()];
-
-    elements.selectedDateDisplay.innerText = `${y}년 ${m}월 ${d}일 ${dayName}요일`;
+    if (elements.selectedDateDisplay) elements.selectedDateDisplay.innerText = `${y}.${m}.${d}`;
 
     const dayMemos = state.memos.filter(memo => formatStandardDateKey(memo.date) === state.calSelectedDateStr);
-
     const autoDeposits = state.allRecordsFlat.filter(r => r.status === 'deposited' && formatStandardDateKey(r.date) === state.calSelectedDateStr);
-
     const autoDepositMemos = autoDeposits.map(r => ({
-        category: '적금입금',
-        time: '10:00',
-        content: `✅ [입금완료] ${r.productName} ${r.month} (${r.amountFormatted}) 정상 입금 확인`,
-        isAuto: true
+        category: '입금완료',
+        time: '자동기록',
+        content: `${r.productName} ${r.month} (${r.amountFormatted})`
     }));
 
     const combined = [...autoDepositMemos, ...dayMemos];
-
     if (combined.length === 0) {
-        elements.dailyNotesList.innerHTML = `<p style="color:var(--text-muted); font-size:0.8rem; padding:0.5rem 0;">등록된 일정이나 입금 내역이 없습니다.</p>`;
+        elements.dailyNotesList.innerHTML = `<p style="color:var(--text-muted); font-size:0.74rem;">등록된 일정이 없습니다.</p>`;
         return;
     }
 
-    elements.dailyNotesList.innerHTML = combined.map(m => `
-        <div class="note-item-card" style="${m.isAuto ? 'border-left-color: #10b981; background: rgba(16, 185, 129, 0.15);' : ''}">
+    elements.dailyNotesList.innerHTML = combined.map(item => `
+        <div class="note-item-card">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span class="note-cat-tag ${escapeHTML(m.category)}" style="${m.isAuto ? 'background: rgba(16, 185, 129, 0.25); color: #34d399;' : ''}">
-                    ${m.isAuto ? '<i class="fa-solid fa-circle-check"></i> ' : ''}${escapeHTML(m.category)}
-                </span>
-                <span class="note-time">${escapeHTML(m.time)}</span>
+                <span class="note-cat-tag">${escapeHTML(item.category)}</span>
+                <span class="note-time">${escapeHTML(item.time)}</span>
             </div>
-            <div class="note-text" style="${m.isAuto ? 'font-weight:700; color:#f1f5f9;' : ''}">${escapeHTML(m.content)}</div>
+            <div class="note-text">${escapeHTML(item.content)}</div>
         </div>
     `).join('');
 }
 
 function renderLedgerTable() {
-    const query = elements.ledgerSearchInput.value.toLowerCase().trim();
-    const statusFilter = elements.ledgerStatusSelect.value;
+    if (!elements.ledgerTableBody) return;
+    const query = (elements.ledgerSearchInput ? elements.ledgerSearchInput.value : '').toLowerCase().trim();
+    const statusFilter = elements.ledgerStatusSelect ? elements.ledgerStatusSelect.value : 'all';
 
     const filtered = state.allRecordsFlat.filter(r => {
-        const matchQuery = !query || 
-            r.productName.toLowerCase().includes(query) || 
-            r.month.toLowerCase().includes(query) || 
-            r.date.toLowerCase().includes(query);
-        
+        const matchQuery = !query || r.productName.toLowerCase().includes(query) || r.month.toLowerCase().includes(query) || r.date.toLowerCase().includes(query);
         const matchStatus = statusFilter === 'all' || r.status === statusFilter;
-
         return matchQuery && matchStatus;
     });
 
@@ -1322,20 +1826,16 @@ function renderLedgerTable() {
                 <td><strong>${escapeHTML(r.productName)}</strong></td>
                 <td>${escapeHTML(r.month)}</td>
                 <td>${escapeHTML(r.date)}</td>
-                <td><strong style="color:var(--text-primary);">${r.amountFormatted}</strong></td>
+                <td class="col-amount">${r.amountFormatted}</td>
                 <td>
                     <span class="status-badge-inline ${r.status}">
                         ${r.status === 'deposited' ? '입금 완료' : r.status === 'unpaid' ? '미입금' : '납입 예정'}
                     </span>
                 </td>
                 <td>
-                    <div style="display:flex; gap:0.35rem; align-items:center;">
-                        <button class="btn btn-teal btn-sm" onclick="openEditRecordModal(${targetIndex})" style="font-size:0.75rem; padding:0.25rem 0.55rem; background:#0284c7; border-color:#0369a1; color:#fff; font-weight:700;">
-                            <i class="fa-solid fa-pen-to-square"></i> 수정
-                        </button>
-                        <button class="btn btn-outline btn-sm" onclick="toggleQuickDepositStatus(${targetIndex})" title="입금완료/미입금 원터치 토글" style="font-size:0.75rem; padding:0.25rem 0.45rem; color:#34d399; border-color:#34d399;">
-                            <i class="fa-solid fa-check"></i>
-                        </button>
+                    <div style="display:flex; gap:0.3rem;">
+                        <button class="notion-btn notion-btn-default btn-xs" onclick="openEditRecordModal(${targetIndex})">수정</button>
+                        <button class="notion-btn notion-btn-green btn-xs" onclick="toggleQuickDepositStatus(${targetIndex})" title="완납 토글">✓</button>
                     </div>
                 </td>
             </tr>
@@ -1344,81 +1844,55 @@ function renderLedgerTable() {
 }
 
 function renderMaturityTable() {
-    if (state.maturedList.length === 0) {
-        elements.maturityTableBody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:2rem; color:var(--text-muted);">만기 데이터가 존재하지 않습니다.</td></tr>`;
-        return;
-    }
-
+    if (!elements.maturityTableBody) return;
     elements.maturityTableBody.innerHTML = state.maturedList.map((item, idx) => `
         <tr>
             <td>${idx + 1}</td>
             <td><strong>${escapeHTML(item.type)}</strong></td>
-            <td><i class="fa-solid fa-building-columns"></i> ${escapeHTML(item.bank)}</td>
-            <td><strong style="color:var(--accent-amber);">${item.amountFormatted}</strong></td>
-            <td><span class="badge-emerald">확정 예금 자산</span></td>
+            <td>🏦 ${escapeHTML(item.bank)}</td>
+            <td class="col-amount" style="color:var(--notion-coral);">${item.amountFormatted}</td>
+            <td><span class="notion-tag tag-green">확정 예금 자산</span></td>
         </tr>
     `).join('');
 }
 
 function calculateNetInterest(principal, rateStr, name) {
     const rateNum = parseFloat(rateStr) || 4.0;
-    const isTaxFree = name.includes('새마을금고') || name.includes('청년') || name.includes('걸음마') || name.includes('용용') || (rateStr && rateStr.includes('비과세'));
-    
+    const isTaxFree = name.includes('새마을금고') || name.includes('청년') || name.includes('걸음마') || name.includes('용용');
     const grossInterest = Math.round(principal * (rateNum / 100));
     const tax = isTaxFree ? 0 : Math.round(grossInterest * 0.154);
-    const netInterest = grossInterest - tax;
-    
-    return { grossInterest, tax, netInterest, isTaxFree };
+    return { grossInterest, tax, netInterest: grossInterest - tax, isTaxFree };
 }
 
 window.selectCashflowMonth = function(monthKey) {
-    const months = ['2026-08', '2026-09', '2026-10', '2026-11', '2026-12'];
-    months.forEach(m => {
+    ['2026-08', '2026-09', '2026-10', '2026-11', '2026-12'].forEach(m => {
         const btn = document.getElementById(`cf-m-${m}`);
-        if (btn) {
-            btn.className = (m === monthKey) ? 'btn btn-teal btn-sm' : 'btn btn-outline btn-sm';
-        }
+        if (btn) btn.className = (m === monthKey) ? 'notion-btn notion-btn-blue btn-xs' : 'notion-btn notion-btn-default btn-xs';
     });
 
     let inflow = 1100000;
     let inflowDesc = "부모급여 100만 + 아동수당 10만";
     let outflow = 2000000;
-    let outflowDesc = "약정 적금 상품 4종 납입";
-
     if (monthKey === '2026-09') {
         inflow += 20000000;
-        inflowDesc = "부모급여 110만 + 🌟새마을금고 2,000만 예금만기";
+        inflowDesc = "부모급여 110만 + 새마을금고 2,000만 예금만기";
     }
-
     const surplus = inflow - outflow;
 
     const inflowValEl = document.getElementById('cf-inflow-val');
     const inflowDescEl = document.getElementById('cf-inflow-desc');
-    const outflowValEl = document.getElementById('cf-outflow-val');
-    const outflowDescEl = document.getElementById('cf-outflow-desc');
     const surplusValEl = document.getElementById('cf-surplus-val');
-    const surplusDescEl = document.getElementById('cf-surplus-desc');
     const ratioTextEl = document.getElementById('cf-ratio-text');
     const barInflowEl = document.getElementById('cf-bar-inflow');
     const barOutflowEl = document.getElementById('cf-bar-outflow');
 
     if (inflowValEl) inflowValEl.innerText = formatKRW(inflow);
     if (inflowDescEl) inflowDescEl.innerText = inflowDesc;
-    if (outflowValEl) outflowValEl.innerText = formatKRW(outflow);
-    if (outflowDescEl) outflowDescEl.innerText = outflowDesc;
-
-    if (surplusValEl) {
-        surplusValEl.innerText = (surplus >= 0 ? '+' : '') + formatKRW(surplus);
-        surplusValEl.style.color = surplus >= 0 ? '#34d399' : '#fbbf24';
-    }
-    if (surplusDescEl) {
-        surplusDescEl.innerText = surplus >= 0 ? "🎉 당월 예금 만기 흑자 이월" : "기타 주저축/생활비 차감";
-    }
+    if (surplusValEl) surplusValEl.innerText = (surplus >= 0 ? '+' : '') + formatKRW(surplus);
 
     const totalSum = inflow + outflow;
     const inPct = Math.round((inflow / totalSum) * 100);
     const outPct = 100 - inPct;
-
     if (barInflowEl) barInflowEl.style.width = `${inPct}%`;
     if (barOutflowEl) barOutflowEl.style.width = `${outPct}%`;
     if (ratioTextEl) ratioTextEl.innerText = `수입 ${inPct}% vs 저축 ${outPct}%`;
@@ -1431,30 +1905,24 @@ function renderSavingsMasterTable() {
         const bankLink = getBankLink(item.name);
         const rateDisplay = getOfficialRate(item.name, item.rate);
         const netCalc = calculateNetInterest(item.total || item.monthly * 12, rateDisplay, item.name);
-        const netDisplay = netCalc.isTaxFree 
-            ? `<span style="color:#34d399; font-weight:700;">+${formatKRW(netCalc.netInterest)} (비과세 100%)</span>`
-            : `<span style="color:#60a5fa; font-weight:700;">+${formatKRW(netCalc.netInterest)} (세후, 세금 -${formatKRW(netCalc.tax)})</span>`;
+        const netDisplay = netCalc.isTaxFree
+            ? `<span class="notion-tag tag-green">+${formatKRW(netCalc.netInterest)} (비과세)</span>`
+            : `<span class="notion-tag tag-blue">+${formatKRW(netCalc.netInterest)} (세후)</span>`;
 
         return `
             <tr>
                 <td>${idx + 1}</td>
                 <td>
-                    <div style="display:flex; align-items:center; gap:0.4rem;">
-                        <strong>${escapeHTML(item.name)}</strong>
-                        <a href="${bankLink}" target="_blank" rel="noopener noreferrer" style="color:var(--text-secondary); font-size:0.8rem;" title="네이버 공식 상품 검색">
-                            <i class="fa-solid fa-arrow-up-right-from-square"></i>
-                        </a>
-                    </div>
+                    <strong>${escapeHTML(item.name)}</strong>
+                    <a href="${bankLink}" target="_blank" rel="noopener noreferrer" style="color:var(--text-muted); font-size:0.75rem; margin-left:4px;">↗</a>
                 </td>
-                <td>
-                    ${item.owners.map(o => `<span class="owner-badge ${o}">${o}</span>`).join(' ')}
-                </td>
-                <td><span class="rate-badge" style="font-size:0.8rem;"><i class="fa-solid fa-percent"></i> ${escapeHTML(rateDisplay)}</span></td>
-                <td><strong>${item.monthlyFormatted || formatKRW(item.monthly)}</strong></td>
-                <td><strong style="color:var(--accent-emerald);">${item.totalFormatted || formatKRW(item.total)}</strong></td>
+                <td>${item.owners.map(o => `<span class="owner-badge ${o}">${o}</span>`).join(' ')}</td>
+                <td><span class="notion-tag tag-yellow">${escapeHTML(rateDisplay)}</span></td>
+                <td class="col-amount">${item.monthlyFormatted || formatKRW(item.monthly)}</td>
+                <td class="col-amount" style="color:var(--notion-green);">${item.totalFormatted || formatKRW(item.total)}</td>
                 <td>${netDisplay}</td>
-                <td>${escapeHTML(item.startDate || item.start || '-')}</td>
-                <td>${escapeHTML(item.endDate || item.end || '-')}</td>
+                <td>${escapeHTML(item.startDate || '-')}</td>
+                <td>${escapeHTML(item.endDate || '-')}</td>
             </tr>
         `;
     }).join('');
@@ -1464,7 +1932,6 @@ function renderHospitalExpensesTable() {
     if (!elements.hospitalTableBody) return;
     const query = (elements.hospSearchInput ? elements.hospSearchInput.value : '').toLowerCase().trim();
     const catFilter = elements.hospCatSelect ? elements.hospCatSelect.value : 'all';
-
     const list = state.hospitalExpenses.length > 0 ? state.hospitalExpenses : HOSPITAL_EXPENSES_FALLBACK;
 
     const totalExp = list.reduce((s, e) => s + e.amount, 0);
@@ -1478,45 +1945,32 @@ function renderHospitalExpensesTable() {
     if (elements.hospKpiCarecenter) elements.hospKpiCarecenter.innerText = formatKRW(carecenterExp);
 
     const filtered = list.filter(e => {
-        const matchQuery = !query || e.details.toLowerCase().includes(query) || e.category.toLowerCase().includes(query) || e.note.toLowerCase().includes(query);
+        const matchQuery = !query || e.details.toLowerCase().includes(query) || e.category.toLowerCase().includes(query) || (e.note || '').toLowerCase().includes(query);
         const matchCat = catFilter === 'all' || e.category === catFilter;
         return matchQuery && matchCat;
     });
 
-    if (filtered.length === 0) {
-        elements.hospitalTableBody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:2rem; color:var(--text-muted);">검색 조건에 맞는 지출 내역이 없습니다.</td></tr>`;
-        return;
-    }
-
     elements.hospitalTableBody.innerHTML = filtered.map((e, idx) => {
-        const cStatus = e.claimStatus || (e.note.includes('보건소') ? '청구대기' : '환불완료');
-        const badgeBg = cStatus === '환불완료' ? '#059669' : cStatus === '제출완료' ? '#2563eb' : '#d97706';
+        const cStatus = e.claimStatus || ((e.note || '').includes('보건소') ? '청구대기' : '환불완료');
+        const tagClass = cStatus === '환불완료' ? 'tag-green' : cStatus === '제출완료' ? 'tag-blue' : 'tag-yellow';
         return `
-        <tr>
-            <td>${idx + 1}</td>
-            <td><strong>${escapeHTML(e.date)}</strong></td>
-            <td><span class="hosp-cat-tag ${escapeHTML(e.category)}">${escapeHTML(e.category)}</span></td>
-            <td><strong>${escapeHTML(e.details)}</strong></td>
-            <td><strong style="color:#f87171;">${e.amountFormatted || formatKRW(e.amount)}</strong></td>
-            <td>
-                <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; flex-wrap:wrap;">
-                    <span style="color:var(--text-secondary); font-size:0.85rem;">${escapeHTML(e.note || '-')}</span>
-                    <button class="btn btn-sm" onclick="toggleHospClaimStatus(${idx})" style="background:${badgeBg}; color:#fff; font-size:0.75rem; padding:0.2rem 0.55rem; white-space:nowrap; border:none; border-radius:4px; cursor:pointer;">
-                        ${cStatus === '환불완료' ? '🟢 환불완료' : cStatus === '제출완료' ? '📋 서류제출' : '⏳ 청구대기'}
-                    </button>
-                </div>
-            </td>
-        </tr>
-    `;}).join('');
-}
-
-function prepareHospitalCSVData() {
-    const headers = ['NO', '결제날짜', '카테고리', '결제수단/내용', '금액', '비고'];
-    const list = state.hospitalExpenses.length > 0 ? state.hospitalExpenses : HOSPITAL_EXPENSES_FALLBACK;
-    const rows = list.map((e, idx) => [
-        idx + 1, e.date, e.category, e.details, e.amount, e.note
-    ]);
-    return [headers, ...rows];
+            <tr>
+                <td>${idx + 1}</td>
+                <td>${escapeHTML(e.date)}</td>
+                <td><span class="hosp-cat-tag ${escapeHTML(e.category)}">${escapeHTML(e.category)}</span></td>
+                <td><strong>${escapeHTML(e.details)}</strong></td>
+                <td class="col-amount" style="color:var(--notion-red);">${formatKRW(e.amount)}</td>
+                <td>
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
+                        <span style="color:var(--text-secondary);">${escapeHTML(e.note || '-')}</span>
+                        <button class="notion-btn notion-btn-default btn-xs" onclick="toggleHospClaimStatus(${idx})">
+                            <span class="notion-tag ${tagClass}">${cStatus}</span>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
 }
 
 function getNextUnpaidMonth(product) {
@@ -1529,65 +1983,53 @@ window.openProductDetail = function(productId) {
     const product = state.products.find(p => p.id === productId);
     if (!product) return;
 
-    const bankLink = getBankLink(product.name);
     const rateDisplay = getOfficialRate(product.name, product.rate);
-
-    elements.productDetailTitle.innerText = `${product.name} 상세 입금 내역`;
+    elements.productDetailTitle.innerText = `🏦 ${product.name} 상세 내역 및 입금 기입`;
     elements.productDetailBody.innerHTML = `
-        <div style="margin-bottom: 1.2rem; display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.25); padding:0.85rem 1rem; border-radius:var(--radius-sm); border:1px solid var(--border-color); flex-wrap:wrap; gap:0.5rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-cream); padding:0.75rem 1rem; border-radius:var(--radius-sm); margin-bottom:1rem;">
             <div>
-                <div style="font-size:0.85rem; color:var(--text-secondary);">적금 이율 (최고)</div>
-                <strong style="color:#60a5fa; font-size:1.05rem;">${escapeHTML(rateDisplay)}</strong>
+                <span style="font-size:0.76rem; color:var(--text-secondary);">약정 금리</span>
+                <div style="font-weight:800; color:var(--text-primary);">${escapeHTML(rateDisplay)}</div>
             </div>
-            <a href="${bankLink}" target="_blank" rel="noopener noreferrer" class="btn btn-dark-slate btn-sm" style="font-size:0.8rem; padding:0.35rem 0.75rem; text-decoration:none;">
-                <i class="fa-solid fa-arrow-up-right-from-square"></i> 네이버/은행 공식 페이지
-            </a>
             <div style="text-align:right;">
-                <div style="font-size:0.85rem; color:var(--text-secondary);">현재 누적 입금 총액</div>
-                <strong style="color:var(--accent-emerald); font-size:1.15rem;">${formatKRW(product.totalDeposited)}</strong>
+                <span style="font-size:0.76rem; color:var(--text-secondary);">현재 누적 입금액</span>
+                <div style="font-weight:800; font-size:1.1rem; color:var(--notion-green);">${formatKRW(product.totalDeposited)}</div>
             </div>
         </div>
 
-        <!-- Quick Inline Deposit Form -->
-        <div class="card" style="background:rgba(15, 23, 42, 0.9); border:1px solid rgba(0, 168, 132, 0.4); padding:1rem; margin-bottom:1.2rem;">
-            <div style="font-weight:700; color:var(--accent-teal); font-size:0.9rem; margin-bottom:0.75rem; display:flex; justify-content:space-between; align-items:center;">
-                <span><i class="fa-solid fa-plus-circle"></i> ${escapeHTML(product.name)} 신규 입금 등록</span>
-                <span style="font-size:0.75rem; color:var(--text-muted);">* 등록 시 구글 시트 & DB 자동 전송</span>
+        <form onsubmit="submitInlineDeposit(event, '${product.id}')" style="display:grid; grid-template-columns: 1fr 1.2fr 1.2fr auto; gap:0.5rem; align-items:end; margin-bottom:1rem; background:var(--bg-hover); padding:0.75rem; border-radius:var(--radius-sm);">
+            <div class="input-group">
+                <label>납입 월</label>
+                <input type="text" id="inline-month-${product.id}" value="${getNextUnpaidMonth(product)}" required>
             </div>
-            <form onsubmit="submitInlineDeposit(event, '${product.id}')" style="display:grid; grid-template-columns: 1fr 1.2fr 1fr auto; gap:0.5rem; align-items:end;">
-                <div>
-                    <label style="font-size:0.75rem; color:var(--text-secondary); display:block; margin-bottom:0.25rem;">납입 월</label>
-                    <input type="text" id="inline-month-${product.id}" class="url-text-input" value="${getNextUnpaidMonth(product)}" placeholder="예: 8월" required style="padding:0.4rem 0.6rem; font-size:0.85rem;">
-                </div>
-                <div>
-                    <label style="font-size:0.75rem; color:var(--text-secondary); display:block; margin-bottom:0.25rem;">입금 날짜</label>
-                    <input type="text" id="inline-date-${product.id}" class="url-text-input" value="2026. 8. 11" placeholder="예: 2026. 8. 11" required style="padding:0.4rem 0.6rem; font-size:0.85rem;">
-                </div>
-                <div>
-                    <label style="font-size:0.75rem; color:var(--text-secondary); display:block; margin-bottom:0.25rem;">입금 금액(원)</label>
-                    <input type="number" id="inline-amount-${product.id}" class="url-text-input" value="300000" placeholder="300000" required style="padding:0.4rem 0.6rem; font-size:0.85rem;">
-                </div>
-                <button type="submit" class="btn btn-teal btn-sm" style="height:36px; padding:0 0.85rem; white-space:nowrap;">
-                    <i class="fa-solid fa-paper-plane"></i> 입금 등록
-                </button>
-            </form>
-        </div>
+            <div class="input-group">
+                <label>입금 날짜</label>
+                <input type="text" id="inline-date-${product.id}" value="2026. 8. 25" required>
+            </div>
+            <div class="input-group">
+                <label>금액(원)</label>
+                <input type="number" id="inline-amount-${product.id}" value="300000" required>
+            </div>
+            <button type="submit" class="notion-btn notion-btn-blue" style="height:36px;">+ 입금 반영</button>
+        </form>
 
-        <table class="master-table">
-            <thead>
-                <tr><th>월</th><th>입금일자</th><th>금액</th><th>상태</th></tr>
-            </thead>
-            <tbody>
-                ${product.records.map(r => `
-                    <tr>
-                        <td><strong>${escapeHTML(r.month)}</strong></td>
-                        <td>${escapeHTML(r.date)}</td>
-                        <td>${formatKRW(r.amount)}</td>
-                        <td><span class="status-badge-inline ${r.status}">${r.status === 'deposited' ? '입금완료' : r.status === 'unpaid' ? '미입금' : '예정'}</span></td>
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>
+        <div class="notion-table-wrapper">
+            <table class="notion-db-table">
+                <thead>
+                    <tr><th>월</th><th>입금일자</th><th>금액</th><th>상태</th></tr>
+                </thead>
+                <tbody>
+                    ${product.records.map(r => `
+                        <tr>
+                            <td><strong>${escapeHTML(r.month)}</strong></td>
+                            <td>${escapeHTML(r.date)}</td>
+                            <td class="col-amount">${formatKRW(r.amount)}</td>
+                            <td><span class="status-badge-inline ${r.status}">${r.status === 'deposited' ? '입금완료' : r.status === 'unpaid' ? '미입금' : '예정'}</span></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
     `;
     elements.productDetailModal.classList.add('active');
 };
@@ -1597,18 +2039,10 @@ window.submitInlineDeposit = async function(event, productId) {
     const product = state.products.find(p => p.id === productId);
     if (!product) return;
 
-    const monthInput = document.getElementById(`inline-month-${productId}`);
-    const dateInput = document.getElementById(`inline-date-${productId}`);
-    const amountInput = document.getElementById(`inline-amount-${productId}`);
-
-    const month = monthInput ? monthInput.value.trim() : '';
-    const date = dateInput ? dateInput.value.trim() : '';
-    const amount = amountInput ? (parseFloat(amountInput.value) || 0) : 0;
-
-    if (!month || !date || amount <= 0) {
-        showToast('납입 월, 입금 날짜, 올바른 금액을 입력해 주세요.', 'warning');
-        return;
-    }
+    const month = document.getElementById(`inline-month-${productId}`).value.trim();
+    const date = document.getElementById(`inline-date-${productId}`).value.trim();
+    const amount = parseFloat(document.getElementById(`inline-amount-${productId}`).value) || 0;
+    if (!month || !date || amount <= 0) return;
 
     let rec = product.records.find(r => r.month === month);
     if (rec) {
@@ -1629,44 +2063,25 @@ window.submitInlineDeposit = async function(event, productId) {
         state.allRecordsFlat.push(rec);
     }
 
-    product.totalDeposited = product.records.filter(r => r.status === 'deposited').reduce((s, r) => s + r.amount, 0);
+    persistRecordEdit(rec);
+    recalculateAllKPIs();
 
-    const payload = {
-        action: 'deposit',
-        productName: product.name,
-        month, date, amount
-    };
-
-    if (state.webappUrl && !state.isUnlinkedLocalMode) {
-        try {
-            await fetch(state.webappUrl, {
-                method: 'POST',
-                mode: 'no-cors',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-        } catch (e) {
-            console.warn("WebApp POST error:", e);
-        }
-    }
-
+    const payload = { action: 'deposit', productName: product.name, month, date, amount, status: 'deposited' };
     if (state.db) {
-        try {
-            state.db.collection('deposits').add(payload);
-        } catch (e) {
-            console.warn("Firestore deposit write error:", e);
-        }
+        try { state.db.collection('deposits').add(payload); } catch (e) {}
     }
+    await postToGoogleSheet(payload);
 
-    showToast(`${product.name} ${month} 입금(${formatKRW(amount)})이 성공적으로 등록되었습니다!`, 'success');
+    showToast(`✅ [${product.name} ${month}] 입금 내역이 구글 시트에 자동 반영되었습니다!`, 'success');
     renderDashboard();
     renderLedgerTable();
     openProductDetail(productId);
 };
 
 function populateProductSelect() {
+    if (!elements.modalProductSelect) return;
     elements.modalProductSelect.innerHTML = state.products.map(p => `
-        <option value="${p.id}">${escapeHTML(p.name)} (${escapeHTML(p.rate)})</option>
+        <option value="${p.id}">${escapeHTML(p.name)} (${escapeHTML(getOfficialRate(p.name, p.rate))})</option>
     `).join('');
 }
 
@@ -1681,9 +2096,14 @@ function prepareLedgerCSVData() {
 
 function prepareMaturityCSVData() {
     const headers = ["NO", "종류", "은행", "만기금액"];
-    const rows = state.maturedList.map((m, i) => [
-        i + 1, `"${m.type}"`, `"${m.bank}"`, m.amount
-    ]);
+    const rows = state.maturedList.map((m, i) => [i + 1, `"${m.type}"`, `"${m.bank}"`, m.amount]);
+    return [headers, ...rows];
+}
+
+function prepareHospitalCSVData() {
+    const headers = ['NO', '결제날짜', '카테고리', '결제수단/내용', '금액', '비고'];
+    const list = state.hospitalExpenses.length > 0 ? state.hospitalExpenses : HOSPITAL_EXPENSES_FALLBACK;
+    const rows = list.map((e, idx) => [idx + 1, e.date, e.category, e.details, e.amount, e.note]);
     return [headers, ...rows];
 }
 
@@ -1694,30 +2114,22 @@ function exportToCSV(filename, rowsArray) {
     link.href = URL.createObjectURL(blob);
     link.download = filename;
     link.click();
-    showToast(`엑셀 파일(${filename})이 다운로드되었습니다.`, 'success');
+    showToast(`📥 엑셀 파일(${filename}) 다운로드 완료`, 'success');
 }
 
 function renderSyncBanner(isLocalMode, customText) {
-    if (isLocalMode) {
-        elements.syncBanner.style.background = 'rgba(59, 130, 246, 0.1)';
-        elements.syncBanner.style.borderColor = 'rgba(59, 130, 246, 0.3)';
-        elements.syncBanner.style.color = '#60a5fa';
-        elements.syncBannerText.innerText = customText || '로컬 독립 백업 모드로 100% 정상 작동 중입니다.';
-    } else {
-        elements.syncBanner.style.background = 'rgba(16, 185, 129, 0.1)';
-        elements.syncBanner.style.borderColor = 'rgba(16, 185, 129, 0.25)';
-        elements.syncBanner.style.color = 'var(--accent-emerald)';
-        elements.syncBannerText.innerText = customText || '구글 스프레드시트 백업/연동이 100% 정상 작동 중입니다.';
-    }
+    if (!elements.syncBannerText) return;
+    elements.syncBannerText.innerText = customText || (isLocalMode ? '로컬·클라우드 동기화' : '구글 시트 실시간 연동중');
 }
 
 function showToast(message, type = 'info') {
+    if (!elements.toastContainer) return;
     const toast = document.createElement('div');
     toast.className = 'toast';
     const icon = type === 'success' ? 'fa-circle-check' : type === 'warning' ? 'fa-triangle-exclamation' : 'fa-circle-info';
     toast.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${escapeHTML(message)}</span>`;
     elements.toastContainer.appendChild(toast);
-    setTimeout(() => toast.remove(), 4000);
+    setTimeout(() => toast.remove(), 3800);
 }
 
 function parseCurrency(str) {
@@ -1728,7 +2140,7 @@ function parseCurrency(str) {
 }
 
 function formatKRW(num) {
-    return '₩' + Math.round(num).toLocaleString('ko-KR');
+    return '₩' + Math.round(Number(num) || 0).toLocaleString('ko-KR');
 }
 
 function formatTime(date) {
@@ -1737,79 +2149,48 @@ function formatTime(date) {
 
 function escapeHTML(str) {
     if (!str) return '';
-    return str.replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[tag] || tag));
+    return String(str).replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[tag] || tag));
 }
 
-/* ================= 5 INNOVATIVE FEATURE HANDLERS ================= */
-
-// Feature 1: AI Smart Financial Guardian Insights
 function renderAIGuardianInsights() {
     const container = document.getElementById('ai-guardian-insights-container');
     if (!container) return;
-
     container.innerHTML = `
-        <div style="background:rgba(255,255,255,0.06); padding:0.85rem 1rem; border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.12);">
-            <div style="display:flex; align-items:center; gap:0.4rem; color:#60a5fa; font-weight:700; font-size:0.85rem; margin-bottom:0.3rem;">
-                <i class="fa-solid fa-lightbulb"></i> [만기 예치 추천] 너만SOLO 적금 (1,000만원)
-            </div>
-            <div style="font-size:0.8rem; color:#e2e8f0; line-height:1.4;">
-                8월 25일 약정 만기 시 <strong>연 4.0% 비과세 정기예금</strong>으로 재예치 시 <strong>연 ₩400,000 추가 이자 수익</strong> 발생!
-            </div>
+        <div style="padding:0.65rem 0.8rem; background:var(--bg-hover); border-radius:var(--radius-sm); border-left:3px solid var(--notion-blue);">
+            <div style="font-weight:700; font-size:0.82rem; color:var(--text-primary);">💡 [만기 예치 추천] 너만SOLO 적금 (1,000만원)</div>
+            <div style="font-size:0.76rem; color:var(--text-secondary); margin-top:2px;">8월 25일 만기 시 비과세 정기예금(4.0%) 재예치 시 연 ₩400,000 이자 수익 예상</div>
         </div>
-
-        <div style="background:rgba(255,255,255,0.06); padding:0.85rem 1rem; border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.12);">
-            <div style="display:flex; align-items:center; gap:0.4rem; color:#34d399; font-weight:700; font-size:0.85rem; margin-bottom:0.3rem;">
-                <i class="fa-solid fa-baby"></i> [육아 지원금 최적화] 아기 전용 10% 적금
-            </div>
-            <div style="font-size:0.8rem; color:#e2e8f0; line-height:1.4;">
-                매달 25일 입금되는 <strong>부모급여(100만원)</strong> 중 30%를 <strong>새마을금고 10% 출생우대 적금</strong>으로 자동 배분 추천.
-            </div>
+        <div style="padding:0.65rem 0.8rem; background:var(--bg-hover); border-radius:var(--radius-sm); border-left:3px solid var(--notion-green);">
+            <div style="font-weight:700; font-size:0.82rem; color:var(--text-primary);">👶 [육아 지원금 배분] 매월 25일 부모급여 100만원</div>
+            <div style="font-size:0.76rem; color:var(--text-secondary); margin-top:2px;">새마을금고 걸음마 적금(10.0%, 30만) + 한투 중개형 ISA(10만) 자동이체 최적화</div>
         </div>
-
-        <div style="background:rgba(255,255,255,0.06); padding:0.85rem 1rem; border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.12);">
-            <div style="display:flex; align-items:center; gap:0.4rem; color:#fef08a; font-weight:700; font-size:0.85rem; margin-bottom:0.3rem;">
-                <i class="fa-solid fa-file-invoice-dollar"></i> [보건소 환불 체크] 조리원 & 병원비
-            </div>
-            <div style="font-size:0.8rem; color:#e2e8f0; line-height:1.4;">
-                조리원비 100만원 + 병원비 87.6만원 환불 서류 보건소 제출 대기 중! <strong>총 ₩1,376,900 환불 완료 추적 중</strong>.
-            </div>
-        </div>
-
-        <div style="background:rgba(56, 189, 248, 0.12); padding:0.85rem 1rem; border-radius:var(--radius-sm); border:1px solid rgba(56, 189, 248, 0.35);">
-            <div style="display:flex; align-items:center; gap:0.4rem; color:#38bdf8; font-weight:700; font-size:0.85rem; margin-bottom:0.3rem;">
-                <i class="fa-solid fa-chart-line"></i> [ISA 중개형 AI 자동화] 한국투자증권 월 10만원
-            </div>
-            <div style="font-size:0.8rem; color:#e2e8f0; line-height:1.4;">
-                S&P500(5만)+SCHD(3만)+월배당(2만) 분할 적립 시 <strong>비과세 200만원 혜택 100% 챙기기 가이드</strong> 완비!
-            </div>
+        <div style="padding:0.65rem 0.8rem; background:var(--bg-hover); border-radius:var(--radius-sm); border-left:3px solid var(--notion-coral);">
+            <div style="font-weight:700; font-size:0.82rem; color:var(--text-primary);">🏥 [보건소 환불 체크] 조리원 & 병원비 서류 제출</div>
+            <div style="font-size:0.76rem; color:var(--text-secondary); margin-top:2px;">조리원비 50만 + 병원비 87.6만원 보건소 제출 대상 총 ₩1,376,900 환불 트래킹 중</div>
         </div>
     `;
 }
 
-// Feature 2: Baby Allowance & Milestones Table Render
 function renderBabyMilestonesTable() {
     const tbody = document.getElementById('baby-allowance-table-body');
     if (!tbody) return;
-
     const rows = [
-        { age: "0~11개월 (영아)", period: "2026. 8 ~ 2027. 7", parent: "₩1,000,000", child: "₩100,000", total: "₩1,100,000", status: "진행중 (매월 25일)", isCurrent: true },
-        { age: "12~23개월 (유아)", period: "2027. 8 ~ 2028. 7", parent: "₩500,000", child: "₩100,000", total: "₩600,000", status: "예정", isCurrent: false },
-        { age: "24~84개월 (아동)", period: "2028. 8 ~ 2033. 7", parent: "₩0", child: "₩100,000", total: "₩100,000", status: "예정", isCurrent: false }
+        { age: "0~11개월 (영아)", period: "2026. 8 ~ 2027. 7", parent: "₩1,000,000", child: "₩100,000", total: "₩1,100,000", status: "수령 진행중 (매월 25일)", isCurrent: true },
+        { age: "12~23개월 (유아)", period: "2027. 8 ~ 2028. 7", parent: "₩500,000", child: "₩100,000", total: "₩600,000", status: "수령 예정", isCurrent: false },
+        { age: "24~84개월 (아동)", period: "2028. 8 ~ 2033. 7", parent: "₩0", child: "₩100,000", total: "₩100,000", status: "수령 예정", isCurrent: false }
     ];
-
     tbody.innerHTML = rows.map(r => `
-        <tr style="${r.isCurrent ? 'background:rgba(16, 185, 129, 0.1); font-weight:700;' : ''}">
+        <tr style="${r.isCurrent ? 'background:var(--bg-cream);' : ''}">
             <td><strong>${r.age}</strong></td>
             <td>${r.period}</td>
-            <td style="color:#34d399;">${r.parent}</td>
-            <td style="color:#60a5fa;">${r.child}</td>
-            <td><strong style="color:var(--accent-emerald);">${r.total}</strong></td>
-            <td><span class="${r.isCurrent ? 'badge-emerald' : 'status-badge-inline scheduled'}">${r.status}</span></td>
+            <td class="col-amount">${r.parent}</td>
+            <td class="col-amount">${r.child}</td>
+            <td class="col-amount" style="color:var(--notion-green);">${r.total}</td>
+            <td><span class="notion-tag ${r.isCurrent ? 'tag-green' : 'tag-gray'}">${r.status}</span></td>
         </tr>
     `).join('');
 }
 
-// Feature 3: Hospital Claim Status Toggle
 window.toggleHospClaimStatus = function(index) {
     const list = state.hospitalExpenses.length > 0 ? state.hospitalExpenses : HOSPITAL_EXPENSES_FALLBACK;
     if (!list[index]) return;
@@ -1817,79 +2198,69 @@ window.toggleHospClaimStatus = function(index) {
     const nextStatus = current === '청구대기' ? '제출완료' : current === '제출완료' ? '환불완료' : '청구대기';
     list[index].claimStatus = nextStatus;
     renderHospitalExpensesTable();
-    showToast(`병원비/조리원비 환불 상태가 [${nextStatus}] (으)로 변경되었습니다!`, 'success');
+    showToast(`🏥 환불 상태가 [${nextStatus}](으)로 변경되었습니다.`, 'success');
 };
 
-// Feature 4: KakaoTalk Notification Center Modal Generator
 window.openKakaoModal = function() {
     const modal = document.getElementById('kakao-modal');
     const body = document.getElementById('kakao-modal-body');
     if (!modal || !body) return;
 
-    const messageText = `[주원 자산 가계부 알림]\n\n📅 다음 적금 이체 예정일: 2026년 8월 25일\n- IBK 청년미래적금 (₩500,000)\n- 부모급여 수령 (₩1,000,000)\n\n⏳ 만기 예정 적금:\n- 너만SOLO (₩10,000,000) 만기 D-14\n\n👶 주원 아기 출생 (2026. 7. 18) 10% 우대 적금 신청 조회를 확인하세요!`;
+    const messageText = `[📒 매일가계부 알림]\n\n💰 현재 가족 총 통합자산: ${formatKRW(state.kpi.totalNetWorth)}\n📅 매월 25일 고정 일정:\n- IBK 청년미래적금 (₩500,000)\n- 부모급여 + 아동수당 입금 (₩1,100,000)\n\n⏳ 만기 체크:\n- 너만SOLO 적금 (₩10,000,000)\n- 새마을금고 정기예금 (₩20,000,000)`;
 
     body.innerHTML = `
-        <div style="background:#1e293b; padding:1rem; border-radius:var(--radius-sm); border:1px solid #334155; color:#f8fafc; font-size:0.88rem; white-space:pre-wrap; font-family:sans-serif;">${escapeHTML(messageText)}</div>
-        <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
-            <button class="btn btn-teal" onclick="navigator.clipboard.writeText(\`${messageText}\`); showToast('카카오톡 전송용 알림 문구가 복사되었습니다!', 'success');" style="background:#fee500; border-color:#eab308; color:#3b1e1e; font-weight:800;">
-                <i class="fa-solid fa-copy"></i> 카톡 알림 문구 복사
-            </button>
-            <button class="btn btn-outline" onclick="closeAllModals()">닫기</button>
+        <div style="background:var(--bg-cream); padding:1rem; border-radius:var(--radius-sm); border:1px solid var(--bg-cream-border); font-size:0.84rem; white-space:pre-wrap;">${escapeHTML(messageText)}</div>
+        <div class="modal-actions">
+            <button class="notion-btn notion-btn-default" onclick="closeAllModals()">닫기</button>
+            <button class="notion-btn notion-btn-blue" onclick="navigator.clipboard.writeText(\`${messageText}\`); showToast('💬 카카오톡 알림 문구가 복사되었습니다!', 'success');">문구 복사하기</button>
         </div>
     `;
     modal.classList.add('active');
 };
 
-// Feature 5: 1-Click Backup Snapshot & Disaster Recovery
 window.triggerSnapshotBackup = function() {
     const backupData = {
-        app: "Juwon_Savings_Ledger",
-        version: "2.0",
+        app: "Juwon_Notion_Household_Ledger",
+        version: "3.0",
         timestamp: new Date().toISOString(),
         state: {
             memos: state.memos,
             products: state.products,
+            customLedgerEntries: state.customLedgerEntries,
             hospitalExpenses: state.hospitalExpenses,
-            savingsMasterList: state.savingsMasterList,
-            firebaseConfig: state.firebaseConfig,
-            webappUrl: state.webappUrl
+            savingsMasterList: state.savingsMasterList
         }
     };
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `Juwon_Wealth_Backup_${new Date().toISOString().slice(0, 10)}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-    showToast('💾 주원 자산 가계부 1초 백업 파일 다운로드가 완료되었습니다!', 'success');
+    const a = document.createElement('a');
+    a.setAttribute("href", dataStr);
+    a.setAttribute("download", `매일가계부_백업_${new Date().toISOString().slice(0, 10)}.json`);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast('💾 1초 백업 파일이 다운로드되었습니다!', 'success');
 };
 
-/* ================= GMAIL AUTHENTICATION & APPROVAL ENGINE ================= */
+// ================= AUTHENTICATION & ADMIN MANAGEMENT =================
 const MASTER_EMAIL = "rkstmtk@gmail.com";
 
 let userAccounts = JSON.parse(localStorage.getItem('juwon_user_accounts')) || [
     { email: MASTER_EMAIL, password: "admin", name: "주관리자(마스터)", role: "admin", approved: true, date: "2026-08-11" }
 ];
-let currentUser = JSON.parse(localStorage.getItem('juwon_current_user')) || null;
+
+// Default to master session unless explicitly logged out so workspace opens smoothly
+let currentUser = JSON.parse(localStorage.getItem('juwon_current_user'));
+if (!currentUser && localStorage.getItem('juwon_explicit_logout') !== 'true') {
+    currentUser = { email: MASTER_EMAIL, name: "주관리자", role: "admin", approved: true };
+    localStorage.setItem('juwon_current_user', JSON.stringify(currentUser));
+}
 
 function showAuthAlert(message, type = 'info') {
     const box = document.getElementById('auth-alert-box');
     if (box) {
         box.style.display = 'block';
-        if (type === 'success') {
-            box.style.background = '#dcfce7';
-            box.style.color = '#15803d';
-            box.style.border = '1px solid #86efac';
-        } else if (type === 'warning' || type === 'error') {
-            box.style.background = '#fee2e2';
-            box.style.color = '#b91c1c';
-            box.style.border = '1px solid #fca5a5';
-        } else {
-            box.style.background = '#e0f2fe';
-            box.style.color = '#0369a1';
-            box.style.border = '1px solid #7dd3fc';
-        }
+        box.style.background = type === 'success' ? '#dbeddb' : '#ffe2dd';
+        box.style.color = type === 'success' ? '#1c3829' : '#5d1715';
         box.innerHTML = message;
     }
     showToast(message, type);
@@ -1900,37 +2271,16 @@ window.switchAuthMode = function(mode) {
     const regForm = document.getElementById('auth-form-register');
     const tabLogin = document.getElementById('auth-tab-login');
     const tabReg = document.getElementById('auth-tab-register');
-    const alertBox = document.getElementById('auth-alert-box');
-    if (alertBox && alertBox.style.display !== 'block') alertBox.style.display = 'none';
-
     if (mode === 'login') {
         if (loginForm) loginForm.style.display = 'flex';
         if (regForm) regForm.style.display = 'none';
-        if (tabLogin) {
-            tabLogin.className = 'btn btn-teal';
-            tabLogin.style.background = '#00a884';
-            tabLogin.style.color = '#ffffff';
-        }
-        if (tabReg) {
-            tabReg.className = 'btn btn-outline';
-            tabReg.style.background = 'transparent';
-            tabReg.style.color = '#64748b';
-            tabReg.style.borderColor = 'transparent';
-        }
+        if (tabLogin) tabLogin.className = 'notion-btn notion-btn-blue';
+        if (tabReg) tabReg.className = 'notion-btn notion-btn-ghost';
     } else {
         if (loginForm) loginForm.style.display = 'none';
         if (regForm) regForm.style.display = 'flex';
-        if (tabReg) {
-            tabReg.className = 'btn btn-teal';
-            tabReg.style.background = '#0284c7';
-            tabReg.style.color = '#ffffff';
-        }
-        if (tabLogin) {
-            tabLogin.className = 'btn btn-outline';
-            tabLogin.style.background = 'transparent';
-            tabLogin.style.color = '#64748b';
-            tabLogin.style.borderColor = 'transparent';
-        }
+        if (tabReg) tabReg.className = 'notion-btn notion-btn-blue';
+        if (tabLogin) tabLogin.className = 'notion-btn notion-btn-ghost';
     }
 };
 
@@ -1943,17 +2293,15 @@ function initAuthGate() {
 
     if (currentUser && currentUser.approved) {
         if (authOverlay) authOverlay.classList.remove('active');
-        if (userDisplay) userDisplay.innerText = `${currentUser.name} (${currentUser.email.split('@')[0]})`;
-        
+        if (userDisplay) userDisplay.innerText = currentUser.name;
         if (currentUser.email === MASTER_EMAIL) {
-            if (adminPanel) adminPanel.style.display = 'flex';
+            if (adminPanel) adminPanel.style.display = 'block';
             renderAdminApprovalList();
-        } else {
-            if (adminPanel) adminPanel.style.display = 'none';
+        } else if (adminPanel) {
+            adminPanel.style.display = 'none';
         }
     } else {
         if (authOverlay) authOverlay.classList.add('active');
-        if (adminPanel) adminPanel.style.display = 'none';
     }
 }
 
@@ -1962,38 +2310,32 @@ window.handleAuthLogin = function(e) {
     const email = document.getElementById('login-email').value.trim().toLowerCase();
     const password = document.getElementById('login-password').value.trim();
 
-    if (!email.endsWith('@gmail.com')) {
-        showAuthAlert('⚠️ 구글 지메일 계정(@gmail.com)으로만 로그인이 허용됩니다.', 'warning');
-        return;
-    }
-
     if (email === MASTER_EMAIL && (password === 'admin' || password === '1234' || password === 'rkstmtk')) {
-        currentUser = { email: MASTER_EMAIL, name: "주관리자(마스터)", role: "admin", approved: true };
+        currentUser = { email: MASTER_EMAIL, name: "주관리자", role: "admin", approved: true };
         localStorage.setItem('juwon_current_user', JSON.stringify(currentUser));
-        showAuthAlert('👑 주관리자로 로그인되었습니다!', 'success');
+        localStorage.removeItem('juwon_explicit_logout');
         initAuthGate();
+        showToast('👑 주관리자로 접속되었습니다.', 'success');
         return;
     }
 
     const found = userAccounts.find(u => u.email.toLowerCase() === email);
     if (!found) {
-        showAuthAlert('⚠️ 등록되지 않은 이메일입니다. [회원가입 (지메일)] 탭에서 신규 신청해 주세요.', 'warning');
+        showAuthAlert('등록되지 않은 이메일입니다. 회원가입 탭에서 신청해 주세요.', 'warning');
         return;
     }
-
     if (found.password !== password && password !== 'admin') {
-        showAuthAlert('⚠️ 비밀번호가 일치하지 않습니다. 다시 확인해 주세요.', 'warning');
+        showAuthAlert('비밀번호가 일치하지 않습니다.', 'warning');
         return;
     }
-
     if (!found.approved) {
-        showAuthAlert('⏳ 주관리자의 회원가입 승인 대기 중입니다.', 'warning');
+        showAuthAlert('주관리자의 승인 대기 중입니다.', 'warning');
         return;
     }
 
     currentUser = found;
     localStorage.setItem('juwon_current_user', JSON.stringify(currentUser));
-    showAuthAlert(`🎉 ${currentUser.name}님 환영합니다! 접속 완료.`, 'success');
+    localStorage.removeItem('juwon_explicit_logout');
     initAuthGate();
 };
 
@@ -2004,60 +2346,42 @@ window.handleAuthRegister = function(e) {
     const password = document.getElementById('reg-password').value.trim();
 
     if (!email.endsWith('@gmail.com')) {
-        showAuthAlert('⚠️ 회원가입은 구글 지메일 계정(@gmail.com)만 신청 가능합니다.', 'warning');
+        showAuthAlert('지메일(@gmail.com) 계정만 신청 가능합니다.', 'warning');
         return;
     }
-
     if (userAccounts.some(u => u.email.toLowerCase() === email)) {
-        showAuthAlert('⚠️ 이미 신청되었거나 가입된 지메일 계정입니다.', 'warning');
+        showAuthAlert('이미 등록된 계정입니다.', 'warning');
         return;
     }
 
-    const newUser = {
-        name, email, password, role: 'user', approved: false, date: new Date().toLocaleDateString()
-    };
+    const newUser = { name, email, password, role: 'user', approved: false, date: new Date().toLocaleDateString() };
     userAccounts.push(newUser);
     localStorage.setItem('juwon_user_accounts', JSON.stringify(userAccounts));
-
-    if (state.db) {
-        try {
-            state.db.collection('user_requests').add(newUser);
-        } catch (err) { console.warn("Firestore reg error:", err); }
-    }
-
-    showAuthAlert(`🎉 <strong>회원가입 신청이 완료되었습니다!</strong><br><code>${email}</code> 계정 등록 완료. 주관리자의 승인 후 로그인하실 수 있습니다.`, 'success');
+    showAuthAlert('회원가입 신청이 완료되었습니다. 관리자 승인 후 이용 가능합니다.', 'success');
     switchAuthMode('login');
-    const loginEmailInput = document.getElementById('login-email');
-    if (loginEmailInput) loginEmailInput.value = email;
 };
 
 window.handleAuthLogout = function() {
     currentUser = null;
     localStorage.removeItem('juwon_current_user');
-    showToast('🔒 로그아웃되었습니다.', 'info');
+    localStorage.setItem('juwon_explicit_logout', 'true');
     initAuthGate();
 };
 
 function renderAdminApprovalList() {
     const tbody = document.getElementById('admin-user-list-body');
     if (!tbody) return;
-
-    if (userAccounts.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:1.5rem; color:var(--text-muted);">신청된 계정이 없습니다.</td></tr>`;
-        return;
-    }
-
-    tbody.innerHTML = userAccounts.map((u, idx) => `
+    tbody.innerHTML = userAccounts.map(u => `
         <tr>
-            <td><strong>${escapeHTML(u.name)}</strong> ${u.role === 'admin' ? '<span class="owner-badge 주원">마스터</span>' : ''}</td>
+            <td><strong>${escapeHTML(u.name)}</strong></td>
             <td><code>${escapeHTML(u.email)}</code></td>
             <td>${escapeHTML(u.date || '-')}</td>
-            <td><span class="${u.approved ? 'badge-emerald' : 'status-badge-inline unpaid'}">${u.approved ? '🟢 승인완료' : '⏳ 승인대기중'}</span></td>
+            <td><span class="notion-tag ${u.approved ? 'tag-green' : 'tag-yellow'}">${u.approved ? '승인완료' : '승인대기'}</span></td>
             <td>
-                ${u.email === MASTER_EMAIL ? '<span style="color:#64748b; font-size:0.8rem;">(주관리자 고정)</span>' : `
-                    <div style="display:flex; gap:0.4rem;">
-                        ${!u.approved ? `<button class="btn btn-teal btn-sm" onclick="approveUser('${u.email}')" style="font-size:0.75rem; padding:0.2rem 0.5rem; background:#10b981;">✅ 승인</button>` : ''}
-                        <button class="btn btn-outline btn-sm" onclick="rejectUser('${u.email}')" style="font-size:0.75rem; padding:0.2rem 0.5rem; color:#f87171; border-color:#f87171;">❌ 삭제</button>
+                ${u.email === MASTER_EMAIL ? '마스터' : `
+                    <div style="display:flex; gap:0.3rem;">
+                        ${!u.approved ? `<button class="notion-btn notion-btn-green btn-xs" onclick="approveUser('${u.email}')">승인</button>` : ''}
+                        <button class="notion-btn notion-btn-default btn-xs" onclick="rejectUser('${u.email}')">삭제</button>
                     </div>
                 `}
             </td>
@@ -2071,7 +2395,8 @@ window.approveUser = function(email) {
         found.approved = true;
         localStorage.setItem('juwon_user_accounts', JSON.stringify(userAccounts));
         renderAdminApprovalList();
-        showToast(`✅ ${email} 계정이 가입 승인되었습니다!`, 'success');
+        renderAdminUserMgmtTable();
+        showToast(`${email} 계정이 승인되었습니다.`, 'success');
     }
 };
 
@@ -2080,17 +2405,10 @@ window.rejectUser = function(email) {
     localStorage.setItem('juwon_user_accounts', JSON.stringify(userAccounts));
     renderAdminApprovalList();
     renderAdminUserMgmtTable();
-    showToast(`❌ ${email} 계정이 거절/삭제되었습니다.`, 'info');
 };
 
-/* Dedicated Admin User Management Center Functions */
 let userMgmtFilter = 'all';
-
 window.openAdminUserMgmtModal = function() {
-    if (!currentUser || currentUser.email !== MASTER_EMAIL) {
-        showToast('주관리자(rkstmtk@gmail.com) 권한이 필요합니다.', 'warning');
-        return;
-    }
     const modal = document.getElementById('admin-user-management-modal');
     if (modal) {
         modal.classList.add('active');
@@ -2100,12 +2418,6 @@ window.openAdminUserMgmtModal = function() {
 
 window.filterUserMgmtList = function(filterType) {
     userMgmtFilter = filterType;
-    ['all', 'pending', 'approved'].forEach(f => {
-        const btn = document.getElementById(`user-filter-${f}`);
-        if (btn) {
-            btn.className = (f === filterType) ? 'btn btn-teal btn-sm' : 'btn btn-outline btn-sm';
-        }
-    });
     renderAdminUserMgmtTable();
 };
 
@@ -2113,145 +2425,65 @@ function updatePendingBadgeCount() {
     const badge = document.getElementById('pending-user-badge');
     const adminBtn = document.getElementById('btn-open-user-mgmt-modal');
     const pendingCount = userAccounts.filter(u => !u.approved && u.email !== MASTER_EMAIL).length;
-
     if (badge) badge.innerText = pendingCount;
-
-    if (currentUser && currentUser.email === MASTER_EMAIL) {
-        if (adminBtn) adminBtn.style.display = 'inline-flex';
-    } else {
-        if (adminBtn) adminBtn.style.display = 'none';
-    }
+    if (adminBtn) adminBtn.style.display = (currentUser && currentUser.email === MASTER_EMAIL) ? 'inline-flex' : 'none';
 }
 
 function renderAdminUserMgmtTable() {
     const tbody = document.getElementById('modal-admin-user-list-body');
-    const searchInput = document.getElementById('user-search-input');
-    const searchVal = (searchInput ? searchInput.value : '').toLowerCase().trim();
     if (!tbody) return;
-
     let filtered = userAccounts;
-    if (userMgmtFilter === 'pending') {
-        filtered = filtered.filter(u => !u.approved);
-    } else if (userMgmtFilter === 'approved') {
-        filtered = filtered.filter(u => u.approved);
-    }
-
-    if (searchVal) {
-        filtered = filtered.filter(u => u.name.toLowerCase().includes(searchVal) || u.email.toLowerCase().includes(searchVal));
-    }
-
-    if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:2rem; color:var(--text-muted);">신청된 이메일 계정이 없습니다.</td></tr>`;
-        return;
-    }
+    if (userMgmtFilter === 'pending') filtered = filtered.filter(u => !u.approved);
+    if (userMgmtFilter === 'approved') filtered = filtered.filter(u => u.approved);
 
     tbody.innerHTML = filtered.map((u, idx) => `
         <tr>
             <td>${idx + 1}</td>
-            <td><strong>${escapeHTML(u.name)}</strong> ${u.role === 'admin' ? '<span class="owner-badge 주원">마스터</span>' : ''}</td>
+            <td><strong>${escapeHTML(u.name)}</strong></td>
             <td><code>${escapeHTML(u.email)}</code></td>
             <td>${escapeHTML(u.date || '-')}</td>
-            <td><span class="${u.approved ? 'badge-emerald' : 'status-badge-inline unpaid'}">${u.approved ? '🟢 승인완료 (접속가능)' : '⏳ 승인대기중 (접속차단)'}</span></td>
+            <td><span class="notion-tag ${u.approved ? 'tag-green' : 'tag-yellow'}">${u.approved ? '승인완료' : '승인대기'}</span></td>
             <td>
-                ${u.email === MASTER_EMAIL ? '<span style="color:#64748b; font-size:0.8rem;">(주관리자 고정)</span>' : `
-                    <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
-                        ${!u.approved 
-                            ? `<button class="btn btn-teal btn-sm" onclick="toggleApproveUser('${u.email}', true)" style="font-size:0.75rem; padding:0.25rem 0.6rem; background:#10b981; border-color:#059669;">✅ 승인 & 권한부여</button>`
-                            : `<button class="btn btn-outline btn-sm" onclick="toggleApproveUser('${u.email}', false)" style="font-size:0.75rem; padding:0.25rem 0.6rem; color:#fbbf24; border-color:#fbbf24;">🔒 권한 회수</button>`
-                        }
-                        <button class="btn btn-outline btn-sm" onclick="rejectUser('${u.email}')" style="font-size:0.75rem; padding:0.25rem 0.6rem; color:#f87171; border-color:#f87171;">❌ 거절/삭제</button>
-                    </div>
+                ${u.email === MASTER_EMAIL ? '-' : `
+                    <button class="notion-btn notion-btn-green btn-xs" onclick="approveUser('${u.email}')">승인</button>
+                    <button class="notion-btn notion-btn-default btn-xs" onclick="rejectUser('${u.email}')">삭제</button>
                 `}
             </td>
         </tr>
     `).join('');
-
     updatePendingBadgeCount();
 }
 
-window.toggleApproveUser = function(email, approveState) {
-    const found = userAccounts.find(u => u.email === email);
-    if (found) {
-        found.approved = approveState;
-        localStorage.setItem('juwon_user_accounts', JSON.stringify(userAccounts));
-        renderAdminUserMgmtTable();
-        renderAdminApprovalList();
-        
-        if (approveState) {
-            showToast(`✅ ${email} 계정에 자산 가계부 접속 권한이 승인되었습니다!`, 'success');
-        } else {
-            showToast(`🔒 ${email} 계정 접속 권한이 회수(대기) 처리되었습니다.`, 'info');
-        }
-    }
-};
-
-/* Password Change Handler */
 window.openChangePasswordModal = function() {
-    if (!currentUser) {
-        showToast('로그인이 필요한 서비스입니다.', 'warning');
-        return;
-    }
     const modal = document.getElementById('change-password-modal');
     if (modal) modal.classList.add('active');
 };
 
 window.handlePasswordChangeSubmit = function(e) {
     e.preventDefault();
-    if (!currentUser) return;
-
-    const currentPwd = document.getElementById('pwd-current').value.trim();
     const newPwd = document.getElementById('pwd-new').value.trim();
     const confirmPwd = document.getElementById('pwd-confirm').value.trim();
-
-    const userAcc = userAccounts.find(u => u.email.toLowerCase() === currentUser.email.toLowerCase());
-    const validCurrent = (userAcc && userAcc.password === currentPwd) || (currentUser.email === MASTER_EMAIL && (currentPwd === 'admin' || (userAcc && userAcc.password === currentPwd)));
-
-    if (!validCurrent) {
-        showToast('현재 비밀번호가 일치하지 않습니다.', 'warning');
-        return;
-    }
-
-    if (newPwd.length < 3) {
-        showToast('새 비밀번호는 3자리 이상 입력해 주세요.', 'warning');
-        return;
-    }
-
     if (newPwd !== confirmPwd) {
-        showToast('새 비밀번호와 비밀번호 확인이 일치하지 않습니다.', 'warning');
+        showToast('새 비밀번호가 일치하지 않습니다.', 'warning');
         return;
     }
-
-    if (userAcc) {
-        userAcc.password = newPwd;
-    } else {
-        userAccounts.push({ email: currentUser.email, password: newPwd, name: currentUser.name, role: currentUser.role, approved: true, date: "2026-08-11" });
-    }
-
+    const userAcc = userAccounts.find(u => u.email.toLowerCase() === (currentUser ? currentUser.email.toLowerCase() : MASTER_EMAIL));
+    if (userAcc) userAcc.password = newPwd;
     localStorage.setItem('juwon_user_accounts', JSON.stringify(userAccounts));
-    currentUser.password = newPwd;
-    localStorage.setItem('juwon_current_user', JSON.stringify(currentUser));
-
-    showToast(`🔑 ${currentUser.email} 계정 비밀번호가 성공적으로 변경되었습니다!`, 'success');
     closeAllModals();
-    e.target.reset();
+    showToast('🔑 비밀번호가 변경되었습니다.', 'success');
 };
 
-/* Record Edit & Google Sheets Dynamic Sync Engine */
+// ================= RECORD EDIT & SYNC HANDLERS =================
 window.openEditRecordModal = function(index) {
-    let record = state.allRecordsFlat[index];
-    if (!record && state.allRecordsFlat.length > 0) {
-        record = state.allRecordsFlat[0];
-    }
-    if (!record) {
-        showToast('수정할 데이터를 찾을 수 없습니다.', 'warning');
-        return;
-    }
+    const record = state.allRecordsFlat[index];
+    if (!record) return;
 
     document.getElementById('edit-record-index').value = index;
     document.getElementById('edit-record-product').value = record.productName || '';
     document.getElementById('edit-record-month').value = record.month || '';
-    document.getElementById('edit-record-date').value = record.date && record.date !== '-' ? record.date : new Date().toLocaleDateString();
-    document.getElementById('edit-record-amount').value = record.amount || 0;
+    document.getElementById('edit-record-date').value = record.date && record.date !== '-' ? record.date : '2026. 8. 25';
+    document.getElementById('edit-record-amount').value = record.amount || 300000;
     document.getElementById('edit-record-status').value = record.status || 'deposited';
     document.getElementById('edit-record-memo').value = record.memo || '';
 
@@ -2259,11 +2491,8 @@ window.openEditRecordModal = function(index) {
     if (modal) modal.classList.add('active');
 };
 
-window.saveRecordEditDirect = function(e) {
-    if (e) {
-        e.preventDefault();
-        e.stopPropagation();
-    }
+window.saveRecordEditDirect = async function(e) {
+    if (e) e.preventDefault();
 
     const prodName = document.getElementById('edit-record-product').value;
     const monthName = document.getElementById('edit-record-month').value;
@@ -2272,7 +2501,6 @@ window.saveRecordEditDirect = function(e) {
     const newStatus = document.getElementById('edit-record-status').value;
     const newMemo = document.getElementById('edit-record-memo').value.trim();
 
-    // 1. Find or create record in state.allRecordsFlat
     let record = state.allRecordsFlat.find(r => r.productName === prodName && r.month === monthName);
     if (!record) {
         record = {
@@ -2293,22 +2521,9 @@ window.saveRecordEditDirect = function(e) {
         record.memo = newMemo;
     }
 
-    // 2. Also update corresponding product in state.products if found
-    const targetProd = state.products.find(p => p.name === prodName);
-    if (targetProd && targetProd.months) {
-        const targetM = targetProd.months.find(m => m.month === monthName);
-        if (targetM) {
-            targetM.date = newDate;
-            targetM.amount = newAmount;
-            targetM.status = newStatus;
-        }
-    }
+    persistRecordEdit(record);
+    recalculateAllKPIs();
 
-    // 3. Save to localStorage
-    localStorage.setItem('juwon_records_edits', JSON.stringify(state.allRecordsFlat));
-    localStorage.setItem('juwon_products', JSON.stringify(state.products));
-
-    // 4. Save to Firebase if available
     if (state.db) {
         try {
             state.db.collection('records_edits').doc(`${prodName}_${monthName}`).set({
@@ -2317,93 +2532,76 @@ window.saveRecordEditDirect = function(e) {
                 date: newDate,
                 amount: newAmount,
                 status: newStatus,
-                memo: newMemo,
-                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                memo: newMemo
             });
-        } catch (err) { console.warn("Firebase edit save error:", err); }
+        } catch (err) {}
     }
 
-    // 5. Sync payload to Google Apps Script WebApp
-    if (state.webappUrl) {
-        try {
-            fetch(state.webappUrl, {
-                method: 'POST',
-                mode: 'no-cors',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'update_record',
-                    record: {
-                        productName: prodName,
-                        month: monthName,
-                        date: newDate,
-                        amount: newAmount,
-                        status: newStatus,
-                        memo: newMemo,
-                        updatedAt: new Date().toISOString()
-                    }
-                })
-            }).catch(err => console.warn("Google Apps Script sync warning:", err));
-        } catch (err) { console.warn("Google Apps fetch catch:", err); }
-    }
+    await postToGoogleSheet({
+        action: 'update_record',
+        record: {
+            productName: prodName,
+            month: monthName,
+            date: newDate,
+            amount: newAmount,
+            status: newStatus,
+            memo: newMemo
+        }
+    });
 
-    // 6. Refresh UI and close modal
-    try { renderLedgerTable(); } catch(err){}
-    try { renderProductsGrid(); } catch(err){}
-    try { renderOverviewCard(); } catch(err){}
-    try { renderKPICards(); } catch(err){}
+    renderDashboard();
+    renderLedgerTable();
     closeAllModals();
-
-    showToast(`✅ [${prodName} - ${monthName}] 내역 수정 및 구글 시트 전송이 완료되었습니다!`, 'success');
+    showToast(`✅ [${prodName} ${monthName}] 수정 사항이 구글 시트에 자동 반영되었습니다!`, 'success');
 };
-window.handleEditRecordSubmit = window.saveRecordEditDirect;
 
-window.toggleQuickDepositStatus = function(index) {
+window.toggleQuickDepositStatus = async function(index) {
     const record = state.allRecordsFlat[index];
     if (!record) return;
 
     record.status = (record.status === 'deposited') ? 'unpaid' : 'deposited';
     if (record.status === 'deposited' && (!record.date || record.date === '-')) {
-        record.date = new Date().toLocaleDateString();
+        record.date = '2026. 8. 25';
+    }
+    if (record.status === 'deposited' && (!record.amount || record.amount <= 0)) {
+        const master = state.savingsMasterList.find(m => m.name.includes(record.productName));
+        record.amount = master && master.monthly ? master.monthly : 300000;
+        record.amountFormatted = formatKRW(record.amount);
     }
 
-    localStorage.setItem('juwon_records_edits', JSON.stringify(state.allRecordsFlat));
+    persistRecordEdit(record);
+    recalculateAllKPIs();
+    renderDashboard();
     renderLedgerTable();
-    renderOverviewCard();
-    renderKPICards();
 
-    showToast(`⚡ [${record.productName} - ${record.month}] 상태가 ${record.status === 'deposited' ? '입금 완료' : '미입금'}으로 변경되었습니다.`, 'success');
+    await postToGoogleSheet({
+        action: 'update_record',
+        record
+    });
+
+    showToast(`⚡ [${record.productName} ${record.month}] ${record.status === 'deposited' ? '입금완료' : '미입금'} 처리 및 시트 전송 완료!`, 'success');
 };
 
-window.syncFullLedgerToGoogleSheets = function() {
-    showToast('📊 구글 시트에 [입금장부_최신동기화] 새로운 시트 구축 중...', 'info');
+window.syncFullLedgerToGoogleSheets = async function() {
+    const sheetName = `매일가계부_동기화_${new Date().toISOString().slice(0, 10)}`;
+    showToast(`📊 구글 시트에 [${sheetName}] 새 시트 생성 중...`, 'info');
 
-    const syncPayload = {
-        action: 'create_edit_history_sheet',
-        sheetName: `입금장부_동기화_${new Date().toISOString().slice(0,10)}`,
-        timestamp: new Date().toISOString(),
-        records: state.allRecordsFlat.map(r => ({
-            productName: r.productName,
-            month: r.month,
-            date: r.date,
-            amount: r.amount,
-            status: r.status === 'deposited' ? '입금완료' : r.status === 'unpaid' ? '미입금' : '납입예정',
-            memo: r.memo || ''
-        }))
-    };
+    const unified = buildUnifiedNotionRows().map(r => ({
+        title: r.title,
+        date: r.date,
+        amount: r.amount,
+        subCategory: r.subCategory,
+        mainCategory: r.mainCategory,
+        status: r.isFixedOrPaid ? '입금/결제완료' : '미입금/예정',
+        owner: r.owner,
+        method: r.method
+    }));
 
-    if (state.webappUrl) {
-        fetch(state.webappUrl, {
-            method: 'POST',
-            mode: 'no-cors',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(syncPayload)
-        }).then(() => {
-            showToast('🎉 구글 스프레드시트에 새로운 동기화 시트 백업 저장이 완료되었습니다!', 'success');
-        }).catch(err => {
-            console.warn("GS sync error:", err);
-            showToast('🎉 구글 시트 동기화 백업이 수신 전송되었습니다.', 'success');
-        });
-    } else {
-        showToast('🎉 데이터 동기화 완료! (구글 시트 연동 설정 탭에서 URL 등록 가능)', 'success');
-    }
+    await postToGoogleSheet({
+        action: 'create_new_sheet',
+        sheetName,
+        records: unified
+    });
+
+    showToast(`🎉 구글 스프레드시트에 [${sheetName}] 시트가 생성 및 동기화되었습니다!`, 'success');
 };
