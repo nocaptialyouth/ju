@@ -197,14 +197,26 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /**
- * Sends POST payload to Google Apps Script
- * Backward-compatible with V1 (always sets action='deposit' for ledger updates) AND V4.5 (uses subAction)
+ * Sends a write request to Google Apps Script V4.5.
+ * IMPORTANT: no-cors returns an opaque response. A resolved fetch only means
+ * the browser dispatched the request; it NEVER proves the sheet was updated.
  */
 async function postToGoogleSheet(payload) {
     if (!state.webappUrl || state.isUnlinkedLocalMode) {
-        showToast('⚠️ 구글 Apps Script 웹앱 URL이 등록되어 있지 않습니다. [🔗 새 배포 URL 연결] 버튼을 눌러 등록해주세요.', 'warning');
-        return false;
+        return { sent: false, reason: '웹앱 URL이 없거나 로컬 모드입니다.' };
     }
+    const url = state.webappUrl.trim();
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/.test(url)) {
+        return { sent: false, reason: '올바른 Apps Script /exec 배포 URL이 아닙니다.' };
+    }
+
+    // A saved Code.gs file and a deployed /exec version can differ.
+    // If a readable GET proves the deployment is old, do not write to it.
+    const deployment = await inspectWebAppDeployment(url);
+    if (deployment.state === 'outdated') {
+        return { sent: false, reason: '연결된 Apps Script가 V4.5가 아닙니다. [배포 관리 → 수정 → 새 버전 → 배포]를 진행하세요.' };
+    }
+
     try {
         const subAction = payload.subAction || payload.action || 'deposit';
         const compatAction = (subAction === 'memo') ? 'memo' : 'deposit';
@@ -213,17 +225,49 @@ async function postToGoogleSheet(payload) {
             action: compatAction,
             subAction: subAction
         };
-        await fetch(state.webappUrl, {
+        await fetch(url, {
             method: 'POST',
             mode: 'no-cors',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify(bodyObj)
         });
-        return true;
+        // An opaque response cannot reveal the HTTP status or Apps Script JSON.
+        // Read the sheet back. If it is not observable, say "unconfirmed".
+        const confirmation = await verifySheetWrite(payload);
+        return { sent: true, ...confirmation };
     } catch (err) {
         console.warn("Google Apps Script POST warning:", err);
-        return false;
+        return { sent: false, reason: '네트워크 전송에 실패했습니다. 연결 URL과 인터넷 상태를 확인하세요.' };
     }
+}
+
+async function inspectWebAppDeployment(url = state.webappUrl) {
+    try {
+        const checkUrl = url + (url.includes('?') ? '&' : '?') + 'ping=1&t=' + Date.now();
+        const response = await fetch(checkUrl, { method: 'GET', cache: 'no-store' });
+        if (!response.ok) return { state: 'unverified', reason: `HTTP ${response.status}` };
+        const json = await response.json();
+        if (json && json.version === '4.5' && json.status === 'ok' && json.sheetName) {
+            return { state: 'current', sheetName: json.sheetName };
+        }
+        return { state: 'outdated' };
+    } catch (err) {
+        // Google may block cross-origin response reading. Do not mistake this
+        // for successful verification; POST can still be attempted separately.
+        return { state: 'unverified', reason: '배포 응답을 브라우저에서 확인할 수 없습니다.' };
+    }
+}
+
+function showSheetWriteResult(result, description) {
+    if (!result || !result.sent) {
+        showToast(`⚠️ ${description}: 구글 시트 전송 실패. ${result?.reason || '배포 설정을 확인하세요.'}`, 'error');
+        return;
+    }
+    if (result.confirmed) {
+        showToast(`✅ ${description}: 구글 시트에서 해당 값을 확인했습니다${result.detail ? ` (${result.detail})` : ''}.`, 'success');
+        return;
+    }
+    showToast(`📤 ${description}: 전송 요청 완료. 실제 시트 저장 여부는 아직 확인되지 않았습니다.`, 'warning');
 }
 
 window.copyMacroCodeDirect = function() {
@@ -277,25 +321,27 @@ window.testCurrentWebAppUrl = async function() {
 
     try {
         const checkUrl = url + (url.includes('?') ? '&' : '?') + 'ping=1&t=' + Date.now();
-        const res = await fetch(checkUrl, { method: 'GET' });
+        const res = await fetch(checkUrl, { method: 'GET', cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
-        if (json && json.version) {
+        if (json && json.version === '4.5' && json.status === 'ok' && json.sheetName) {
             if (resultBox) {
-                resultBox.innerHTML = `<span style="color:#0f7b6c; font-weight:600;">✅ V${json.version} 최신 엔진 정상 연결됨! (시트: ${json.sheetName || '량신'})</span>`;
+                // textContent avoids inserting the remote sheet name as HTML.
+                resultBox.textContent = `✅ V${json.version} 배포 응답 확인 (시트: ${json.sheetName}). 실제 쓰기는 별도 확인 필요`;
             }
-            showToast(`✅ Apps Script 최신 엔진(V${json.version}) 연결 성공!`, 'success');
+            showToast('✅ Apps Script V4.5 조회 확인. 시트 쓰기는 별도 점검해야 합니다.', 'success');
             return true;
         } else {
             if (resultBox) {
-                resultBox.innerHTML = '<span style="color:#cb912f; font-weight:600;">⚠️ 구버전 스크립트가 실행 중입니다. 최신 V4.5 코드를 Apps Script에 붙여넣고 [새 배포] 해주세요.</span>';
+                resultBox.textContent = '⚠️ 배포된 웹앱이 V4.5가 아닙니다. [배포 관리 → 수정 → 새 버전 → 배포] 후 URL을 확인하세요.';
             }
             return false;
         }
     } catch (err) {
         if (resultBox) {
-            resultBox.innerHTML = '<span style="color:#2383e2;">ℹ️ URL 연결 확인됨 (배포 시 [액세스 권한: 모든 사용자]로 배포되었는지 확인해주세요).</span>';
+            resultBox.textContent = '⚠️ 배포 응답을 확인하지 못했습니다. URL·접근 권한·브라우저 콘솔의 CORS 오류를 점검하세요.';
         }
-        return true;
+        return false;
     }
 };
 
@@ -519,8 +565,8 @@ function setupEventListeners() {
                 if (state.db) {
                     try { state.db.collection('memos').add(newMemo); } catch (err) {}
                 }
-                await postToGoogleSheet({ subAction: 'memo', ...newMemo });
-                showToast('📅 일정 메모가 저장 및 구글 시트에 전송되었습니다!', 'success');
+                const writeResult = await postToGoogleSheet({ subAction: 'memo', ...newMemo });
+                showSheetWriteResult(writeResult, '일정 메모');
                 closeAllModals();
                 elements.scheduleForm.reset();
                 renderCalendar();
@@ -605,9 +651,8 @@ function setupEventListeners() {
                 if (state.db) {
                     try { state.db.collection('deposits').add(payload); } catch (err) {}
                 }
-                await postToGoogleSheet(payload);
-
-                showToast(`✅ [${product.name} ${month}] ${formatKRW(amount)} 입금 내역이 저장 및 시트로 전송되었습니다!`, 'success');
+                const writeResult = await postToGoogleSheet(payload);
+                showSheetWriteResult(writeResult, `[${product.name} ${month}] ${formatKRW(amount)} 입금 내역`);
                 closeAllModals();
                 elements.depositForm.reset();
                 renderDashboard();
@@ -649,7 +694,7 @@ function setupEventListeners() {
             if (state.db) {
                 try { state.db.collection('products').add(newProdEntry); } catch (err) {}
             }
-            await postToGoogleSheet({
+            const writeResult = await postToGoogleSheet({
                 subAction: 'new_product',
                 productName: name,
                 month: '신규상품',
@@ -658,7 +703,7 @@ function setupEventListeners() {
                 ...newProdEntry
             });
 
-            showToast(`🎉 [${name}] 신규 적금 상품이 등록 및 구글 시트에 전송되었습니다!`, 'success');
+            showSheetWriteResult(writeResult, `[${name}] 신규 적금 상품`);
             closeAllModals();
             elements.newProductForm.reset();
             renderDashboard();
@@ -953,6 +998,129 @@ async function fetchGvizGrid(gid) {
     });
 }
 
+// A newly created tab has no known GID yet; the Google Visualization endpoint
+// also accepts a tab name. This is read-only and does not create a new tab.
+async function fetchGvizGridBySheetName(sheetName) {
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&headers=0&sheet=${encodeURIComponent(sheetName)}&_=${Date.now()}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = await res.text();
+    const start = body.indexOf('{');
+    const end = body.lastIndexOf('}');
+    if (start < 0 || end < 0) throw new Error('Invalid gviz payload');
+    const data = JSON.parse(body.slice(start, end + 1));
+    if (data.status === 'error' || !data.table) throw new Error('Sheet not found or unavailable');
+    return (data.table.rows || []).map(row => (row.c || []).map(cell => {
+        if (!cell) return '';
+        return String(cell.f ?? cell.v ?? '').trim();
+    }));
+}
+
+function sameDateValue(a, b) {
+    return String(a ?? '').replace(/\D/g, '') === String(b ?? '').replace(/\D/g, '');
+}
+
+function sameProductValue(a, b) {
+    const left = normalizeProductName(a).replace(/\s+/g, '').split('(')[0];
+    const right = normalizeProductName(b).replace(/\s+/g, '').split('(')[0];
+    return !!left && !!right && (left.includes(right) || right.includes(left));
+}
+
+function findMonthlySheetEntry(grid, payload) {
+    const item = payload.record || payload;
+    const product = item.productName || item.title || payload.productName || '';
+    const month = String(item.month || payload.month || '').trim();
+    if (!product || !/^\d{1,2}월$/.test(month)) return { blockFound: false, confirmed: false };
+
+    for (let r = 0; r < grid.length - 1; r++) {
+        const row = grid[r] || [];
+        const subRow = grid[r + 1] || [];
+        for (let c = 0; c < subRow.length; c++) {
+            if (String(subRow[c]).trim() !== '월') continue;
+            if (!sameProductValue(`${row[c] || ''} ${row[c + 1] || ''}`, product)) continue;
+            for (let mr = r + 2; mr < grid.length; mr++) {
+                const line = grid[mr] || [];
+                const monthCell = String(line[c] || '').trim();
+                if (['총액', '총급여', '월'].includes(monthCell)) break;
+                if (monthCell !== month) continue;
+                const unpaid = item.status === 'unpaid';
+                const amountMatched = unpaid ? !parseCurrency(line[c + 2]) : parseCurrency(line[c + 2]) === Number(item.amount);
+                const dateMatched = unpaid ? !String(line[c + 1] || '').trim() : sameDateValue(line[c + 1], item.date);
+                return { blockFound: true, confirmed: amountMatched && dateMatched };
+            }
+            return { blockFound: true, confirmed: false };
+        }
+    }
+    return { blockFound: false, confirmed: false };
+}
+
+async function inspectWrittenData(payload) {
+    const action = payload.subAction || payload.action || 'deposit';
+    const item = payload.record || payload;
+
+    if (action === 'create_new_sheet' || action === 'create_edit_history_sheet') {
+        const rows = await fetchGvizGridBySheetName(payload.sheetName);
+        const hasHeader = (rows[0] || []).some(v => String(v).includes('기록내역'));
+        const expected = (payload.records || []).length + 1;
+        return { confirmed: hasHeader && rows.length >= expected, detail: '새 탭' };
+    }
+
+    if (action === 'new_product') {
+        const rows = await fetchGvizGrid(GID_SAVINGS_MASTER);
+        const found = rows.some(row => sameProductValue(row[3], payload.name) &&
+            parseCurrency(row[7]) === Number(payload.monthly) && parseCurrency(row[8]) === Number(payload.initial));
+        return { confirmed: found, detail: '적금 목록' };
+    }
+
+    if (action === 'add_hospital_expense') {
+        const rows = await fetchGvizGrid(GID_HOSPITAL);
+        const found = rows.some(row => sameDateValue(row[1], payload.date) &&
+            String(row[3] || '').trim() === String(payload.details || '').trim() &&
+            parseCurrency(row[4]) === Number(payload.amount));
+        return { confirmed: found, detail: '병원비 목록' };
+    }
+
+    if (action === 'memo') {
+        const rows = await fetchGvizGridBySheetName('일정메모');
+        const found = rows.some(row => sameDateValue(row[0], payload.date) &&
+            String(row[3] || '').trim() === String(payload.content || '').trim());
+        return { confirmed: found, detail: '일정메모' };
+    }
+
+    if (action === 'deposit' || action === 'update_record' || action === 'add_ledger_entry') {
+        if (/^\d{1,2}월$/.test(String(item.month || payload.month || ''))) {
+            const monthly = findMonthlySheetEntry(await fetchGvizGrid(GID_MONTHLY_GRID), payload);
+            if (monthly.blockFound) return { confirmed: monthly.confirmed, detail: '월별 금액 칸' };
+        }
+        const rows = await fetchGvizGridBySheetName('매일가계부_웹입력');
+        const name = item.productName || payload.productName || item.title || '';
+        const month = String(item.month || payload.month || '').trim();
+        const found = rows.some(row => sameProductValue(row[0], name) &&
+            String(row[1] || '').trim() === month &&
+            sameDateValue(row[2], item.date) &&
+            parseCurrency(row[3]) === Number(item.amount) &&
+            String(row[6] || '').trim() === String(item.status || payload.status || 'deposited'));
+        return { confirmed: found, detail: '웹입력 이력' };
+    }
+
+    return { confirmed: false };
+}
+
+async function verifySheetWrite(payload) {
+    // Google Sheets read APIs sometimes lag behind a successful Apps Script
+    // mutation. Never resend POST automatically: it could duplicate a row.
+    for (const delayMs of [700, 1300, 2200]) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        try {
+            const confirmation = await inspectWrittenData(payload);
+            if (confirmation.confirmed) return confirmation;
+        } catch (err) {
+            console.warn('Sheet read-back is unavailable:', err.message);
+        }
+    }
+    return { confirmed: false };
+}
+
 async function fetchData(isSilent = false) {
     let masterOk = false;
     let hospOk = false;
@@ -997,7 +1165,7 @@ async function fetchData(isSilent = false) {
     } else {
         applyLocalAndCloudCustomizations();
         recalculateAllKPIs();
-        renderSyncBanner(false, '구글 시트(량신) 0초 실시간 연동중');
+        renderSyncBanner(false, '구글 시트 데이터 읽기 연결됨 · 쓰기 별도 확인');
     }
 
     renderDashboard();
@@ -1745,7 +1913,7 @@ window.handleNotionQuickAdd = async function() {
     if (titleEl) titleEl.value = '';
     if (amountEl) amountEl.value = '';
 
-    await postToGoogleSheet({
+    const writeResult = await postToGoogleSheet({
         subAction: 'add_ledger_entry',
         productName: matchedProd ? matchedProd.name : title,
         month: monthMatch ? monthMatch[1] : subCategory,
@@ -1768,7 +1936,7 @@ window.handleNotionQuickAdd = async function() {
         }
     });
 
-    showToast(`✨ [${title} — ${formatKRW(amount)}] 내역이 추가 및 구글 시트로 전송되었습니다!`, 'success');
+    showSheetWriteResult(writeResult, `[${title} — ${formatKRW(amount)}] 가계부 내역`);
 };
 
 // ================= CREATE NEW GOOGLE SHEET TAB MODAL HANDLER =================
@@ -1838,11 +2006,7 @@ window.handleCreateNewSheetSubmit = async function(e) {
         records: recordsToExport
     });
 
-    if (ok) {
-        showToast(`🎉 구글 스프레드시트에 [${sheetName}] 새 시트 생성 요청 완료!`, 'success');
-    } else {
-        showToast(`⚠️ 새 시트 생성 요청 실패: 상단 [🔗 새 배포 URL 연결] 버튼을 눌러 Apps Script URL을 확인해 주세요.`, 'error');
-    }
+    showSheetWriteResult(ok, `[${sheetName}] 새 시트 생성`);
 };
 
 // ================= HOSPITAL EXPENSE ADD MODAL HANDLER =================
@@ -1885,7 +2049,7 @@ window.handleHospitalExpenseSubmit = async function(e) {
     if (state.db) {
         try { state.db.collection('hospital_expenses').add(newExp); } catch (err) {}
     }
-    await postToGoogleSheet({
+    const writeResult = await postToGoogleSheet({
         subAction: 'add_hospital_expense',
         productName: `[${category}] ${details}`,
         month: category,
@@ -1894,7 +2058,7 @@ window.handleHospitalExpenseSubmit = async function(e) {
         ...newExp
     });
 
-    showToast(`🏥 [${category} — ${formatKRW(amount)}] 지출 내역이 등록 및 구글 시트에 반영되었습니다!`, 'success');
+    showSheetWriteResult(writeResult, `[${category} — ${formatKRW(amount)}] 병원/조리원 지출`);
 };
 
 // ================= SAVINGS PRODUCTS & TABLES RENDERERS =================
@@ -2382,9 +2546,8 @@ window.submitInlineDeposit = async function(event, productId) {
     if (state.db) {
         try { state.db.collection('deposits').add(payload); } catch (e) {}
     }
-    await postToGoogleSheet(payload);
-
-    showToast(`✅ [${product.name} ${month}] 입금 내역이 저장 및 시트로 전송되었습니다!`, 'success');
+    const writeResult = await postToGoogleSheet(payload);
+    showSheetWriteResult(writeResult, `[${product.name} ${month}] 입금 내역`);
     renderDashboard();
     renderLedgerTable();
     openProductDetail(productId);
@@ -2431,7 +2594,7 @@ function exportToCSV(filename, rowsArray) {
 
 function renderSyncBanner(isLocalMode, customText) {
     if (!elements.syncBannerText) return;
-    elements.syncBannerText.innerText = customText || (isLocalMode ? '로컬 백업 모드' : '구글 시트 실시간 연동중');
+    elements.syncBannerText.innerText = customText || (isLocalMode ? '로컬 백업 모드' : '구글 시트 데이터 읽기 연결됨 · 쓰기 별도 확인');
 }
 
 function showToast(message, type = 'info') {
@@ -2848,7 +3011,7 @@ window.saveRecordEditDirect = async function(e) {
         } catch (err) {}
     }
 
-    await postToGoogleSheet({
+    const writeResult = await postToGoogleSheet({
         subAction: 'update_record',
         productName: prodName,
         month: monthName,
@@ -2870,7 +3033,7 @@ window.saveRecordEditDirect = async function(e) {
     renderSavingsMasterTable();
     renderLedgerTable();
     closeAllModals();
-    showToast(`✅ [${prodName} ${monthName}] 수정 사항이 저장 및 구글 시트로 전송되었습니다!`, 'success');
+    showSheetWriteResult(writeResult, `[${prodName} ${monthName}] 수정 사항`);
 };
 
 window.toggleQuickDepositStatus = async function(index) {
@@ -2893,7 +3056,7 @@ window.toggleQuickDepositStatus = async function(index) {
     renderSavingsMasterTable();
     renderLedgerTable();
 
-    await postToGoogleSheet({
+    const writeResult = await postToGoogleSheet({
         subAction: 'update_record',
         productName: record.productName,
         month: record.month,
@@ -2903,7 +3066,7 @@ window.toggleQuickDepositStatus = async function(index) {
         record
     });
 
-    showToast(`⚡ [${record.productName} ${record.month}] ${record.status === 'deposited' ? '입금완료' : '미입금'} 처리 및 시트 전송 완료!`, 'success');
+    showSheetWriteResult(writeResult, `[${record.productName} ${record.month}] ${record.status === 'deposited' ? '입금완료' : '미입금'} 변경`);
 };
 
 window.syncFullLedgerToGoogleSheets = async function() {
@@ -2921,7 +3084,7 @@ window.syncFullLedgerToGoogleSheets = async function() {
         method: r.method
     }));
 
-    await postToGoogleSheet({
+    const writeResult = await postToGoogleSheet({
         subAction: 'create_new_sheet',
         productName: `[통합백업] ${sheetName}`,
         month: `${unified.length}건`,
@@ -2931,5 +3094,5 @@ window.syncFullLedgerToGoogleSheets = async function() {
         records: unified
     });
 
-    showToast(`🎉 구글 스프레드시트에 [${sheetName}] 시트가 생성 및 동기화되었습니다!`, 'success');
+    showSheetWriteResult(writeResult, `[${sheetName}] 통합 백업 시트 생성`);
 };
