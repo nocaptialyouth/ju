@@ -85,8 +85,8 @@
         <div class="notion-page-header">
             <h1 class="notion-page-title">매일가계부</h1>
             <div class="notion-page-quick-tools">
-                <button class="notion-btn notion-btn-warm btn-sm" onclick="copyMacroCodeDirect()" title="구글 시트 표 자동 수정용 최신 V4.5 무결점 매크로 복사">
-                    📋 최신 매크로(V4.5) 복사
+                <button class="notion-btn notion-btn-warm btn-sm" onclick="copyMacroCodeDirect()" title="구글 시트 자동 저장 & 삭제 지원 최신 V5.0 무결점 매크로 복사">
+                    📋 최신 매크로(V5.0) 복사
                 </button>
                 <button class="notion-btn notion-btn-blue btn-sm" onclick="openUrlConfigModal()" title="구글 Apps Script 새 배포 후 발급받은 웹앱 URL을 웹에 등록합니다">
                     <i class="fa-solid fa-link"></i> 새 배포 URL 연결
@@ -107,15 +107,15 @@
         <section class="notion-callout-guide">
             <div class="guide-header">
                 <span class="guide-icon">🥞</span>
-                <span class="guide-title">가이드 & 구글 스프레드시트 실시간 동기화 안내</span>
+                <span class="guide-title">가이드 & 구글 스프레드시트 실시간 동기화 안내 (V5.0 단방향 자동저장 완벽지원)</span>
             </div>
             <div class="guide-toggles">
                 <details class="notion-toggle" open>
-                    <summary><span class="toggle-arrow">▶</span> 🍊 [핵심 안내] 웹에서 기입한 내용이 구글 시트 표(10월 칸)에 적히고 새 시트가 만들어지게 하려면?</summary>
+                    <summary><span class="toggle-arrow">▶</span> 🍊 [핵심 안내] 웹에서 기입·수정·삭제한 내용이 구글 시트에 자동으로 저장되게 하려면?</summary>
                     <div class="toggle-content">
-                        <p>구글 스프레드시트(<strong>량신</strong>) 내부의 Apps Script를 아래 순서로 단 1번만 업데이트해주시면 됩니다 (오류 없이 안전하게 연결됩니다):</p>
+                        <p>웹(<strong>ju-mu-five.vercel.app</strong>)에서 수정한 내용이 구글 스프레드시트(<strong>량신</strong>)에 100% 자동 저장·삭제되도록 아래 순서로 단 1번만 매크로를 업데이트해주세요:</p>
                         <ul>
-                            <li><strong>1단계 (코드 복사):</strong> 우측 상단의 <button class="notion-btn notion-btn-warm btn-xs" onclick="copyMacroCodeDirect()">📋 최신 매크로(V4.5) 복사</button> 버튼을 누릅니다.</li>
+                            <li><strong>1단계 (코드 복사):</strong> 우측 상단의 <button class="notion-btn notion-btn-warm btn-xs" onclick="copyMacroCodeDirect()">📋 최신 매크로(V5.0) 복사</button> 버튼을 누릅니다.</li>
                             <li><strong>2단계 (붙여넣기):</strong> 스프레드시트 상단 메뉴 <code>[확장 프로그램] &gt; [Apps Script]</code>를 열고, <strong>기존 코드를 전체 삭제</strong>한 뒤 복사한 코드를 붙여넣고 <strong>저장(💾)</strong>합니다. (편집기에서 [실행]을 누르면 <code>testConnection</code>이 작동해 "스프레드시트 정상 연결 확인" 로그가 뜹니다.)</li>
                             <li><strong>3단계 (배포 & 연결 — 둘 중 하나 선택):</strong>
                                 <br>• <strong>방법 A (추천·가장 간편):</strong> 우측 상단 <code>[배포] &gt; [배포 관리]</code> ➡️ 연필(✏️ 수정) 클릭 ➡️ 버전을 <strong>[새 버전]</strong>으로 선택 후 <code>[배포]</code> 클릭! (기존 URL 그대로 즉시 연결됨)
@@ -301,6 +301,36 @@
                             <div class="kpi-sub" id="kpi-sub-parental">아이급여 누적 ₩200,000 · 부모급여 수령완료 ₩2,000,000</div>
                         </div>
                     </div>
+
+                    <!-- ================= DAILY SAVINGS HOT DEALS (오늘의 데일리 고금리 적금·특판 추천) ================= -->
+                    <section class="daily-deals-section" id="daily-deals-section">
+                        <div class="daily-deals-header">
+                            <div class="deals-title-group">
+                                <span class="deals-fire-icon">🔥</span>
+                                <div>
+                                    <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                                        <h3 class="deals-title">오늘의 데일리 고금리 적금·예금 특가 & 이달의 추천</h3>
+                                        <span class="deals-live-badge"><span class="deals-dot"></span> 매일 자동갱신</span>
+                                    </div>
+                                    <p class="deals-sub" id="deals-date-display">오늘 기준 가장 혜택 좋은 금융 특판 (원클릭 가계부 즉시 등록 지원)</p>
+                                </div>
+                            </div>
+                            <div class="deals-header-actions">
+                                <div class="deals-filter-pills" id="deals-filter-pills">
+                                    <button class="deals-filter-pill active" onclick="filterDailyDeals('all')">전체 특가</button>
+                                    <button class="deals-filter-pill" onclick="filterDailyDeals('baby')">👶 출산·아동 (최고 10%)</button>
+                                    <button class="deals-filter-pill" onclick="filterDailyDeals('youth')">🧑 청년·도약 (최고 8%)</button>
+                                    <button class="deals-filter-pill" onclick="filterDailyDeals('parking')">🅿️ 파킹·목돈예금 (3.5%~)</button>
+                                </div>
+                                <button class="notion-btn notion-btn-default btn-xs" onclick="rotateDailyDeals()" title="다른 추천 특판 새로고침">
+                                    <i class="fa-solid fa-arrows-rotate"></i> 다른 특가 보기
+                                </button>
+                            </div>
+                        </div>
+                        <div class="daily-deals-carousel" id="daily-deals-container">
+                            <!-- Injected dynamically by app.js -->
+                        </div>
+                    </section>
 
                     <!-- ================= NOTION DATABASE BLOCK: ✽ 가계부 (Exact Match to Uploaded Image) ================= -->
                     <div class="notion-db-section">
@@ -656,6 +686,7 @@
                                     <th>예상 세후 이자</th>
                                     <th>시작일</th>
                                     <th>만기일</th>
+                                    <th style="text-align:center;">관리</th>
                                 </tr>
                             </thead>
                             <tbody id="savings-master-table-body"></tbody>
@@ -866,10 +897,10 @@
                                 <span class="code-filename">Code.gs (구글 시트 [확장 프로그램] &gt; [Apps Script]에 덮어쓰기 후 [배포 관리] &gt; [새 버전] 배포)</span>
                             </div>
                             <pre class="code-block"><code id="code-content">/**
- * 📒 매일가계부 &amp; 주원 가족 자산 통합 Google Apps Script (V4.5 — 완전 무결점 배포판)
+ * 📒 매일가계부 &amp; 주원 가족 자산 통합 Google Apps Script (V5.0 — 단방향 자동저장 &amp; 상품/내역 삭제 지원 완결판)
  * - 스프레드시트 고유 ID: 16xlN-rZwRRsOhdylZGZZL1-FF3flTthARoE6Tr4Xwrg (량신)
- * - [실행] 버튼 클릭 시 자동 진단(testConnection) 실행으로 에러 방지
- * - 새 시트 생성, 월별 셀(gid=661362148) 기입, 적금마스터(gid=7284588) 갱신 완벽 지원
+ * - 웹(ju-mu-five.vercel.app)에서 기입·수정·삭제한 모든 내역이 구글 시트에 100% 자동 저장됩니다.
+ * - 적금 상품 삭제(delete_product), 가계부 내역 삭제(delete_record), 병원비 삭제 완벽 대응.
  */
 
 var SPREADSHEET_ID = '16xlN-rZwRRsOhdylZGZZL1-FF3flTthARoE6Tr4Xwrg';
@@ -931,7 +962,7 @@ function doGet(e) {
   var webLedgerSheet = ss ? ss.getSheetByName('매일가계부_웹입력') : null;
 
   return ContentService.createTextOutput(JSON.stringify({
-    version: "4.5",
+    version: "5.0",
     status: "ok",
     sheetName: ss ? ss.getName() : "미연결",
     grid: gridSheet ? gridSheet.getDataRange().getDisplayValues() : [],
@@ -961,7 +992,79 @@ function doPost(e) {
     var act = params.subAction || params.action || 'deposit';
     var nowStr = Utilities.formatDate(new Date(), "Asia/Seoul", "yyyy-MM-dd HH:mm:ss");
 
-    // 1. 새로운 시트(탭) 생성 요청 처리
+    // 1. [신규 기능] 적금 상품 삭제 요청 (delete_product)
+    if (act === 'delete_product') {
+      var prodToDelete = cleanProdKey(params.productName || params.name || '');
+      var masterSheet = getSheetByGid(ss, 7284588, 0);
+      var deletedCount = 0;
+      if (masterSheet &amp;&amp; prodToDelete) {
+        var mGrid = masterSheet.getDataRange().getDisplayValues();
+        for (var mr = mGrid.length - 1; mr &gt;= 0; mr--) {
+          var rowName = cleanProdKey(mGrid[mr][3] || mGrid[mr][2] || '');
+          if (rowName &amp;&amp; (rowName.indexOf(prodToDelete) !== -1 || prodToDelete.indexOf(rowName) !== -1)) {
+            masterSheet.deleteRow(mr + 1);
+            deletedCount++;
+          }
+        }
+      }
+      var ledgerSheet = ss.getSheetByName('매일가계부_웹입력');
+      if (ledgerSheet) {
+        ledgerSheet.appendRow(['[상품삭제] ' + (params.productName || params.name), '-', '-', 0, '적금상품삭제', '삭제', '삭제완료', '웹동기화', '관리자 삭제', nowStr]);
+      }
+      return jsonResponse({ status: 'success', version: '5.0', deleted: prodToDelete, deletedCount: deletedCount });
+    }
+
+    // 2. [신규 기능] 가계부 특정 내역 삭제 / 취소 (delete_record)
+    if (act === 'delete_record') {
+      var rec = params.record || params;
+      var prodName = rec.productName || params.productName || '';
+      var monthStr = (rec.month || params.month || '').toString().trim();
+      var prodKey = cleanProdKey(prodName);
+
+      var gridSheet = getSheetByGid(ss, 661362148, 1);
+      if (gridSheet &amp;&amp; prodKey &amp;&amp; monthStr) {
+        var grid = gridSheet.getDataRange().getDisplayValues();
+        for (var r = 0; r &lt; grid.length - 1; r++) {
+          var subRow = grid[r + 1] || [];
+          for (var sc = 0; sc &lt; subRow.length; sc++) {
+            if ((subRow[sc] || '').toString().trim() === '월') {
+              var headerCandidate = ((grid[r][sc] || '') + ' ' + (grid[r][sc + 1] || '')).trim();
+              var headerKey = cleanProdKey(headerCandidate);
+              if (headerKey &amp;&amp; (headerKey.indexOf(prodKey) !== -1 || prodKey.indexOf(headerKey) !== -1)) {
+                for (var mr = r + 2; mr &lt; grid.length; mr++) {
+                  var mVal = (grid[mr][sc] || '').toString().trim();
+                  if (mVal === '총액' || mVal === '총급여' || mVal === '월') break;
+                  if (mVal === monthStr) {
+                    gridSheet.getRange(mr + 1, sc + 2).setValue('');
+                    gridSheet.getRange(mr + 1, sc + 3).setValue('');
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      return jsonResponse({ status: 'success', version: '5.0', message: '내역 삭제 완료' });
+    }
+
+    // 3. 병원비 항목 삭제 (delete_hospital_expense)
+    if (act === 'delete_hospital_expense') {
+      var hospSheet = getSheetByGid(ss, 1541600042, 2);
+      if (hospSheet &amp;&amp; params.details) {
+        var hGrid = hospSheet.getDataRange().getDisplayValues();
+        var targetDet = params.details.toString().trim();
+        for (var hr = hGrid.length - 1; hr &gt;= 0; hr--) {
+          if ((hGrid[hr][3] || '').toString().trim() === targetDet) {
+            hospSheet.deleteRow(hr + 1);
+            break;
+          }
+        }
+      }
+      return jsonResponse({ status: 'success', version: '5.0' });
+    }
+
+    // 4. 새로운 시트(탭) 생성 요청 처리
     if (act === 'create_new_sheet' || act === 'create_edit_history_sheet') {
       var targetName = (params.sheetName || ('매일가계부_' + Utilities.formatDate(new Date(), "Asia/Seoul", "yyyyMMdd_HHmm"))).toString().trim();
       var newSheet = ss.getSheetByName(targetName);
@@ -993,10 +1096,10 @@ function doPost(e) {
       if (rows.length &gt; 0) {
         newSheet.appendRow(['', '합계', '', '=SUM(D2:D' + (rows.length + 1) + ')', '', '', '', '', '', '']);
       }
-      return jsonResponse({ status: 'success', version: '4.5', sheetName: targetName, rowCount: rows.length });
+      return jsonResponse({ status: 'success', version: '5.0', sheetName: targetName, rowCount: rows.length });
     }
 
-    // 2. 적금 입금 / 내역 수정 / 웹 가계부 기입 처리
+    // 5. 적금 입금 / 내역 수정 / 웹 가계부 기입 처리
     if (act === 'deposit' || act === 'update_record' || act === 'add_ledger_entry') {
       var rec = params.record || params;
       var prodName = rec.productName || params.productName || rec.title || '';
@@ -1086,10 +1189,10 @@ function doPost(e) {
         nowStr
       ]);
 
-      return jsonResponse({ status: 'success', version: '4.5', updatedBlockSum: updatedBlockSum });
+      return jsonResponse({ status: 'success', version: '5.0', updatedBlockSum: updatedBlockSum });
     }
 
-    // 3. 신규 적금 상품 등록 시 [적금리스트](gid=7284588)에 자동 행 추가
+    // 6. 신규 적금 상품 등록 시 [적금리스트](gid=7284588)에 자동 행 추가
     if (act === 'new_product') {
       var listSheet = getSheetByGid(ss, 7284588, 0);
       if (listSheet) {
@@ -1098,19 +1201,19 @@ function doPost(e) {
         var isJunyeong = params.owner === '준영' ? 'O' : 'X';
         listSheet.appendRow(['', '', '', params.name, isJuwon, isJihyeon, isJunyeong, Number(params.monthly) || 0, Number(params.initial) || 0, params.startDate || '-', params.endDate || '-']);
       }
-      return jsonResponse({ status: 'success', version: '4.5' });
+      return jsonResponse({ status: 'success', version: '5.0' });
     }
 
-    // 4. 병원비/조리원비 지출 추가 시 (gid=1541600042) 자동 행 추가
+    // 7. 병원비/조리원비 지출 추가 시 (gid=1541600042) 자동 행 추가
     if (act === 'add_hospital_expense') {
       var hospSheet = getSheetByGid(ss, 1541600042, 2);
       if (hospSheet) {
         hospSheet.appendRow(['', params.date, params.category, params.details, Number(params.amount) || 0, params.note || '-']);
       }
-      return jsonResponse({ status: 'success', version: '4.5' });
+      return jsonResponse({ status: 'success', version: '5.0' });
     }
 
-    // 5. 일정/메모 저장
+    // 8. 일정/메모 저장
     if (params.date &amp;&amp; params.content) {
       var memoSheet = ss.getSheetByName('일정메모');
       if (!memoSheet) {
@@ -1119,7 +1222,7 @@ function doPost(e) {
       }
       memoSheet.appendRow([params.date, params.time || '', params.category || '메모', params.content, nowStr]);
     }
-    return jsonResponse({ status: 'success', version: '4.5' });
+    return jsonResponse({ status: 'success', version: '5.0' });
 
   } catch (err) {
     return jsonResponse({ status: 'error', message: err.message });

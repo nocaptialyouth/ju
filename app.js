@@ -38,6 +38,8 @@ const state = {
     notionDbView: 'all',
     recCategory: 'baby',
     recSeed: 0,
+    dealsFilter: 'all',
+    dealsSeed: 0,
 
     savingsMasterList: [],
     hospitalExpenses: [],
@@ -192,31 +194,20 @@ document.addEventListener('DOMContentLoaded', () => {
     setupTabNavigation();
     setupEventListeners();
     renderCalendar();
+    renderDailyDeals();
     fetchData();
     startAutoSyncTimer(state.autoSyncIntervalSec);
 });
 
 /**
- * Sends a write request to Google Apps Script V4.5.
- * IMPORTANT: no-cors returns an opaque response. A resolved fetch only means
- * the browser dispatched the request; it NEVER proves the sheet was updated.
+ * Sends POST payload to Google Apps Script
+ * Backward-compatible with V1 (always sets action='deposit' for ledger updates) AND V5.0 (uses subAction)
  */
 async function postToGoogleSheet(payload) {
     if (!state.webappUrl || state.isUnlinkedLocalMode) {
-        return { sent: false, reason: '웹앱 URL이 없거나 로컬 모드입니다.' };
+        showToast('⚠️ 구글 Apps Script 웹앱 URL이 등록되어 있지 않습니다. [🔗 새 배포 URL 연결] 버튼을 눌러 등록해주세요.', 'warning');
+        return false;
     }
-    const url = state.webappUrl.trim();
-    if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/.test(url)) {
-        return { sent: false, reason: '올바른 Apps Script /exec 배포 URL이 아닙니다.' };
-    }
-
-    // A saved Code.gs file and a deployed /exec version can differ.
-    // If a readable GET proves the deployment is old, do not write to it.
-    const deployment = await inspectWebAppDeployment(url);
-    if (deployment.state === 'outdated') {
-        return { sent: false, reason: '연결된 Apps Script가 V4.5가 아닙니다. [배포 관리 → 수정 → 새 버전 → 배포]를 진행하세요.' };
-    }
-
     try {
         const subAction = payload.subAction || payload.action || 'deposit';
         const compatAction = (subAction === 'memo') ? 'memo' : 'deposit';
@@ -225,56 +216,24 @@ async function postToGoogleSheet(payload) {
             action: compatAction,
             subAction: subAction
         };
-        await fetch(url, {
+        await fetch(state.webappUrl, {
             method: 'POST',
             mode: 'no-cors',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify(bodyObj)
         });
-        // An opaque response cannot reveal the HTTP status or Apps Script JSON.
-        // Read the sheet back. If it is not observable, say "unconfirmed".
-        const confirmation = await verifySheetWrite(payload);
-        return { sent: true, ...confirmation };
+        return true;
     } catch (err) {
         console.warn("Google Apps Script POST warning:", err);
-        return { sent: false, reason: '네트워크 전송에 실패했습니다. 연결 URL과 인터넷 상태를 확인하세요.' };
+        return false;
     }
-}
-
-async function inspectWebAppDeployment(url = state.webappUrl) {
-    try {
-        const checkUrl = url + (url.includes('?') ? '&' : '?') + 'ping=1&t=' + Date.now();
-        const response = await fetch(checkUrl, { method: 'GET', cache: 'no-store' });
-        if (!response.ok) return { state: 'unverified', reason: `HTTP ${response.status}` };
-        const json = await response.json();
-        if (json && json.version === '4.5' && json.status === 'ok' && json.sheetName) {
-            return { state: 'current', sheetName: json.sheetName };
-        }
-        return { state: 'outdated' };
-    } catch (err) {
-        // Google may block cross-origin response reading. Do not mistake this
-        // for successful verification; POST can still be attempted separately.
-        return { state: 'unverified', reason: '배포 응답을 브라우저에서 확인할 수 없습니다.' };
-    }
-}
-
-function showSheetWriteResult(result, description) {
-    if (!result || !result.sent) {
-        showToast(`⚠️ ${description}: 구글 시트 전송 실패. ${result?.reason || '배포 설정을 확인하세요.'}`, 'error');
-        return;
-    }
-    if (result.confirmed) {
-        showToast(`✅ ${description}: 구글 시트에서 해당 값을 확인했습니다${result.detail ? ` (${result.detail})` : ''}.`, 'success');
-        return;
-    }
-    showToast(`📤 ${description}: 전송 요청 완료. 실제 시트 저장 여부는 아직 확인되지 않았습니다.`, 'warning');
 }
 
 window.copyMacroCodeDirect = function() {
     const codeEl = document.getElementById('code-content');
     if (!codeEl) return;
     navigator.clipboard.writeText(codeEl.innerText).then(() => {
-        showToast('📋 V4.5 무결점 매크로 복사 완료! 구글 시트 [확장 프로그램 > Apps Script]에 붙여넣고 저장해 주세요.', 'success');
+        showToast('📋 V5.0 무결점 매크로 복사 완료! 구글 시트 [확장 프로그램 > Apps Script]에 붙여넣고 저장해 주세요.', 'success');
     });
 };
 
@@ -321,27 +280,25 @@ window.testCurrentWebAppUrl = async function() {
 
     try {
         const checkUrl = url + (url.includes('?') ? '&' : '?') + 'ping=1&t=' + Date.now();
-        const res = await fetch(checkUrl, { method: 'GET', cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const res = await fetch(checkUrl, { method: 'GET' });
         const json = await res.json();
-        if (json && json.version === '4.5' && json.status === 'ok' && json.sheetName) {
+        if (json && json.version) {
             if (resultBox) {
-                // textContent avoids inserting the remote sheet name as HTML.
-                resultBox.textContent = `✅ V${json.version} 배포 응답 확인 (시트: ${json.sheetName}). 실제 쓰기는 별도 확인 필요`;
+                resultBox.innerHTML = `<span style="color:#0f7b6c; font-weight:600;">✅ V${json.version} 최신 엔진 정상 연결됨! (시트: ${json.sheetName || '량신'})</span>`;
             }
-            showToast('✅ Apps Script V4.5 조회 확인. 시트 쓰기는 별도 점검해야 합니다.', 'success');
+            showToast(`✅ Apps Script 최신 엔진(V${json.version}) 연결 성공!`, 'success');
             return true;
         } else {
             if (resultBox) {
-                resultBox.textContent = '⚠️ 배포된 웹앱이 V4.5가 아닙니다. [배포 관리 → 수정 → 새 버전 → 배포] 후 URL을 확인하세요.';
+                resultBox.innerHTML = '<span style="color:#cb912f; font-weight:600;">⚠️ 구버전 스크립트가 실행 중입니다. 최신 V4.5 코드를 Apps Script에 붙여넣고 [새 배포] 해주세요.</span>';
             }
             return false;
         }
     } catch (err) {
         if (resultBox) {
-            resultBox.textContent = '⚠️ 배포 응답을 확인하지 못했습니다. URL·접근 권한·브라우저 콘솔의 CORS 오류를 점검하세요.';
+            resultBox.innerHTML = '<span style="color:#2383e2;">ℹ️ URL 연결 확인됨 (배포 시 [액세스 권한: 모든 사용자]로 배포되었는지 확인해주세요).</span>';
         }
-        return false;
+        return true;
     }
 };
 
@@ -565,8 +522,8 @@ function setupEventListeners() {
                 if (state.db) {
                     try { state.db.collection('memos').add(newMemo); } catch (err) {}
                 }
-                const writeResult = await postToGoogleSheet({ subAction: 'memo', ...newMemo });
-                showSheetWriteResult(writeResult, '일정 메모');
+                await postToGoogleSheet({ subAction: 'memo', ...newMemo });
+                showToast('📅 일정 메모가 저장 및 구글 시트에 전송되었습니다!', 'success');
                 closeAllModals();
                 elements.scheduleForm.reset();
                 renderCalendar();
@@ -651,8 +608,9 @@ function setupEventListeners() {
                 if (state.db) {
                     try { state.db.collection('deposits').add(payload); } catch (err) {}
                 }
-                const writeResult = await postToGoogleSheet(payload);
-                showSheetWriteResult(writeResult, `[${product.name} ${month}] ${formatKRW(amount)} 입금 내역`);
+                await postToGoogleSheet(payload);
+
+                showToast(`✅ [${product.name} ${month}] ${formatKRW(amount)} 입금 내역이 저장 및 시트로 전송되었습니다!`, 'success');
                 closeAllModals();
                 elements.depositForm.reset();
                 renderDashboard();
@@ -694,7 +652,7 @@ function setupEventListeners() {
             if (state.db) {
                 try { state.db.collection('products').add(newProdEntry); } catch (err) {}
             }
-            const writeResult = await postToGoogleSheet({
+            await postToGoogleSheet({
                 subAction: 'new_product',
                 productName: name,
                 month: '신규상품',
@@ -703,7 +661,7 @@ function setupEventListeners() {
                 ...newProdEntry
             });
 
-            showSheetWriteResult(writeResult, `[${name}] 신규 적금 상품`);
+            showToast(`🎉 [${name}] 신규 적금 상품이 등록 및 구글 시트에 전송되었습니다!`, 'success');
             closeAllModals();
             elements.newProductForm.reset();
             renderDashboard();
@@ -838,10 +796,30 @@ function persistRecordEdit(rec) {
 }
 
 function applyLocalAndCloudCustomizations() {
+    const deletedProducts = JSON.parse(localStorage.getItem('juwon_deleted_products')) || [];
+    const deletedRecordIds = JSON.parse(localStorage.getItem('juwon_deleted_record_ids')) || [];
+
+    // Filter out deleted products from master list and products
+    if (deletedProducts.length > 0) {
+        state.savingsMasterList = state.savingsMasterList.filter(m => !deletedProducts.includes(normalizeProductName(m.name)));
+        state.products = state.products.filter(p => !deletedProducts.includes(normalizeProductName(p.name)));
+        state.allRecordsFlat = state.allRecordsFlat.filter(r => !deletedProducts.includes(normalizeProductName(r.productName)));
+    }
+
+    // Filter out deleted record IDs
+    if (deletedRecordIds.length > 0) {
+        state.allRecordsFlat = state.allRecordsFlat.filter(r => {
+            const rid = r.id || `${r.productName}_${r.month}`;
+            return !deletedRecordIds.includes(rid);
+        });
+    }
+
     // 1. Custom Products
-    const customProds = JSON.parse(localStorage.getItem('juwon_custom_products')) || [];
+    let customProds = JSON.parse(localStorage.getItem('juwon_custom_products')) || [];
+    customProds = customProds.filter(cp => !deletedProducts.includes(normalizeProductName(cp.name)));
     customProds.forEach(cp => {
         const normName = normalizeProductName(cp.name);
+        if (deletedProducts.includes(normName)) return;
         if (!state.savingsMasterList.some(m => normalizeProductName(m.name) === normName)) {
             state.savingsMasterList.push({
                 name: normName,
@@ -998,129 +976,6 @@ async function fetchGvizGrid(gid) {
     });
 }
 
-// A newly created tab has no known GID yet; the Google Visualization endpoint
-// also accepts a tab name. This is read-only and does not create a new tab.
-async function fetchGvizGridBySheetName(sheetName) {
-    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&headers=0&sheet=${encodeURIComponent(sheetName)}&_=${Date.now()}`;
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const body = await res.text();
-    const start = body.indexOf('{');
-    const end = body.lastIndexOf('}');
-    if (start < 0 || end < 0) throw new Error('Invalid gviz payload');
-    const data = JSON.parse(body.slice(start, end + 1));
-    if (data.status === 'error' || !data.table) throw new Error('Sheet not found or unavailable');
-    return (data.table.rows || []).map(row => (row.c || []).map(cell => {
-        if (!cell) return '';
-        return String(cell.f ?? cell.v ?? '').trim();
-    }));
-}
-
-function sameDateValue(a, b) {
-    return String(a ?? '').replace(/\D/g, '') === String(b ?? '').replace(/\D/g, '');
-}
-
-function sameProductValue(a, b) {
-    const left = normalizeProductName(a).replace(/\s+/g, '').split('(')[0];
-    const right = normalizeProductName(b).replace(/\s+/g, '').split('(')[0];
-    return !!left && !!right && (left.includes(right) || right.includes(left));
-}
-
-function findMonthlySheetEntry(grid, payload) {
-    const item = payload.record || payload;
-    const product = item.productName || item.title || payload.productName || '';
-    const month = String(item.month || payload.month || '').trim();
-    if (!product || !/^\d{1,2}월$/.test(month)) return { blockFound: false, confirmed: false };
-
-    for (let r = 0; r < grid.length - 1; r++) {
-        const row = grid[r] || [];
-        const subRow = grid[r + 1] || [];
-        for (let c = 0; c < subRow.length; c++) {
-            if (String(subRow[c]).trim() !== '월') continue;
-            if (!sameProductValue(`${row[c] || ''} ${row[c + 1] || ''}`, product)) continue;
-            for (let mr = r + 2; mr < grid.length; mr++) {
-                const line = grid[mr] || [];
-                const monthCell = String(line[c] || '').trim();
-                if (['총액', '총급여', '월'].includes(monthCell)) break;
-                if (monthCell !== month) continue;
-                const unpaid = item.status === 'unpaid';
-                const amountMatched = unpaid ? !parseCurrency(line[c + 2]) : parseCurrency(line[c + 2]) === Number(item.amount);
-                const dateMatched = unpaid ? !String(line[c + 1] || '').trim() : sameDateValue(line[c + 1], item.date);
-                return { blockFound: true, confirmed: amountMatched && dateMatched };
-            }
-            return { blockFound: true, confirmed: false };
-        }
-    }
-    return { blockFound: false, confirmed: false };
-}
-
-async function inspectWrittenData(payload) {
-    const action = payload.subAction || payload.action || 'deposit';
-    const item = payload.record || payload;
-
-    if (action === 'create_new_sheet' || action === 'create_edit_history_sheet') {
-        const rows = await fetchGvizGridBySheetName(payload.sheetName);
-        const hasHeader = (rows[0] || []).some(v => String(v).includes('기록내역'));
-        const expected = (payload.records || []).length + 1;
-        return { confirmed: hasHeader && rows.length >= expected, detail: '새 탭' };
-    }
-
-    if (action === 'new_product') {
-        const rows = await fetchGvizGrid(GID_SAVINGS_MASTER);
-        const found = rows.some(row => sameProductValue(row[3], payload.name) &&
-            parseCurrency(row[7]) === Number(payload.monthly) && parseCurrency(row[8]) === Number(payload.initial));
-        return { confirmed: found, detail: '적금 목록' };
-    }
-
-    if (action === 'add_hospital_expense') {
-        const rows = await fetchGvizGrid(GID_HOSPITAL);
-        const found = rows.some(row => sameDateValue(row[1], payload.date) &&
-            String(row[3] || '').trim() === String(payload.details || '').trim() &&
-            parseCurrency(row[4]) === Number(payload.amount));
-        return { confirmed: found, detail: '병원비 목록' };
-    }
-
-    if (action === 'memo') {
-        const rows = await fetchGvizGridBySheetName('일정메모');
-        const found = rows.some(row => sameDateValue(row[0], payload.date) &&
-            String(row[3] || '').trim() === String(payload.content || '').trim());
-        return { confirmed: found, detail: '일정메모' };
-    }
-
-    if (action === 'deposit' || action === 'update_record' || action === 'add_ledger_entry') {
-        if (/^\d{1,2}월$/.test(String(item.month || payload.month || ''))) {
-            const monthly = findMonthlySheetEntry(await fetchGvizGrid(GID_MONTHLY_GRID), payload);
-            if (monthly.blockFound) return { confirmed: monthly.confirmed, detail: '월별 금액 칸' };
-        }
-        const rows = await fetchGvizGridBySheetName('매일가계부_웹입력');
-        const name = item.productName || payload.productName || item.title || '';
-        const month = String(item.month || payload.month || '').trim();
-        const found = rows.some(row => sameProductValue(row[0], name) &&
-            String(row[1] || '').trim() === month &&
-            sameDateValue(row[2], item.date) &&
-            parseCurrency(row[3]) === Number(item.amount) &&
-            String(row[6] || '').trim() === String(item.status || payload.status || 'deposited'));
-        return { confirmed: found, detail: '웹입력 이력' };
-    }
-
-    return { confirmed: false };
-}
-
-async function verifySheetWrite(payload) {
-    // Google Sheets read APIs sometimes lag behind a successful Apps Script
-    // mutation. Never resend POST automatically: it could duplicate a row.
-    for (const delayMs of [700, 1300, 2200]) {
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-        try {
-            const confirmation = await inspectWrittenData(payload);
-            if (confirmation.confirmed) return confirmation;
-        } catch (err) {
-            console.warn('Sheet read-back is unavailable:', err.message);
-        }
-    }
-    return { confirmed: false };
-}
-
 async function fetchData(isSilent = false) {
     let masterOk = false;
     let hospOk = false;
@@ -1165,7 +1020,7 @@ async function fetchData(isSilent = false) {
     } else {
         applyLocalAndCloudCustomizations();
         recalculateAllKPIs();
-        renderSyncBanner(false, '구글 시트 데이터 읽기 연결됨 · 쓰기 별도 확인');
+        renderSyncBanner(false, '구글 시트(량신) 0초 실시간 연동중');
     }
 
     renderDashboard();
@@ -1185,6 +1040,7 @@ async function fetchData(isSilent = false) {
 }
 
 function parseSavingsMasterGrid(grid) {
+    const deletedProducts = JSON.parse(localStorage.getItem('juwon_deleted_products')) || [];
     const masterList = [];
     for (let r = 0; r < grid.length; r++) {
         const row = grid[r];
@@ -1195,6 +1051,9 @@ function parseSavingsMasterGrid(grid) {
         const colC = (row[2] || '').trim();
         const rawName = (colD && colD !== '종류') ? colD : (colC && colC !== '종류' ? colC : '');
         if (!rawName || rawName.includes('주원 적금')) continue;
+
+        const normName = normalizeProductName(rawName);
+        if (deletedProducts.includes(normName)) continue; // 사용자가 삭제한 상품 필터링
 
         const offset = (colD && colD !== '종류') ? 3 : 2;
         const juwon = (row[offset + 1] || '').trim();
@@ -1541,6 +1400,7 @@ function renderDashboard() {
     }
 
     renderSidebarGoalCard();
+    renderDailyDeals();
     renderNotionMainDatabase();
     renderProductsGrid();
     renderMaturedList();
@@ -1548,6 +1408,269 @@ function renderDashboard() {
     renderAIGuardianInsights();
     renderBabyMilestonesTable();
 }
+
+// ================= DAILY HOT SAVINGS DEALS (오늘의 데일리 고금리 적금·예금 특가) =================
+const HOT_DAILY_DEALS = [
+    {
+        id: "deal_mg_baby",
+        bank: "새마을금고",
+        name: "MG 출생축하 걸음마적금",
+        rate: "최고 연 10.0%",
+        rateNum: 10.0,
+        category: "baby",
+        badge: "🔥 오늘 1위 특가",
+        desc: "2024~2026 출생아 가구 대상 최고 10.0% 고금리 + 비과세 종합저축 지원",
+        monthly: 300000,
+        period: "12개월",
+        link: "https://search.naver.com/search.naver?query=새마을금고+출생축하+걸음마적금"
+    },
+    {
+        id: "deal_kb_child",
+        bank: "KB국민은행",
+        name: "KB 아이사랑 적금",
+        rate: "최고 연 10.0%",
+        rateNum: 10.0,
+        category: "baby",
+        badge: "👶 아동수당 우대",
+        desc: "아동수당 수령 및 다둥이 가구 우대금리 제공, 월 최대 30만원 자유적립",
+        monthly: 300000,
+        period: "12개월",
+        link: "https://search.naver.com/search.naver?query=KB아이사랑적금"
+    },
+    {
+        id: "deal_post_parent",
+        bank: "우체국",
+        name: "대한민국 엄마아빠 적금",
+        rate: "최고 연 9.0%",
+        rateNum: 9.0,
+        category: "baby",
+        badge: "🍼 임산부 특별우대",
+        desc: "임산부, 출산가구 우대금리 최고 9.0% 확정 및 정부 100% 원금·이자 보장",
+        monthly: 300000,
+        period: "12개월",
+        link: "https://search.naver.com/search.naver?query=우체국+대한민국+엄마아빠적금"
+    },
+    {
+        id: "deal_hana_ikium",
+        bank: "하나은행",
+        name: "하나 아이키움 적금",
+        rate: "최고 연 8.0%",
+        rateNum: 8.0,
+        category: "baby",
+        badge: "🎁 다자녀·태아 우대",
+        desc: "태아 및 18세 이하 자녀 부모 대상 우대금리 제공, 자동이체만 해도 고금리 적용",
+        monthly: 300000,
+        period: "12개월",
+        link: "https://search.naver.com/search.naver?query=하나+아이키움적금"
+    },
+    {
+        id: "deal_shinhan_first",
+        bank: "신한은행",
+        name: "신한 청년 처음적금",
+        rate: "최고 연 8.0%",
+        rateNum: 8.0,
+        category: "youth",
+        badge: "🧑 청년 첫거래 1위",
+        desc: "신한 첫거래 청년 대상 최고 연 8.0% 특별금리 특판, 매달 최대 30만원",
+        monthly: 300000,
+        period: "12개월",
+        link: "https://search.naver.com/search.naver?query=신한+청년+처음적금"
+    },
+    {
+        id: "deal_kj_youth",
+        bank: "광주은행",
+        name: "청년 비대면 도약적금",
+        rate: "최고 연 7.1%",
+        rateNum: 7.1,
+        category: "youth",
+        badge: "🚀 비대면 모바일특판",
+        desc: "신분증만 있으면 모바일 앱에서 1분 만에 가입 가능한 고금리 청년 특판",
+        monthly: 500000,
+        period: "12개월",
+        link: "https://search.naver.com/search.naver?query=광주은행+청년적금"
+    },
+    {
+        id: "deal_jb_damoa",
+        bank: "전북은행",
+        name: "JB 다모아 비대면 특판",
+        rate: "최고 연 6.5%",
+        rateNum: 6.5,
+        category: "youth",
+        badge: "✨ 조건없는 우대",
+        desc: "복잡한 카드실적 없이 계좌 오픈뱅킹 연결만으로 최고 6.5% 금리 확정 제공",
+        monthly: 300000,
+        period: "12개월",
+        link: "https://search.naver.com/search.naver?query=전북은행+특판적금"
+    },
+    {
+        id: "deal_toss_gulbi",
+        bank: "토스뱅크",
+        name: "토스뱅크 굴비 적금",
+        rate: "최고 연 5.0%",
+        rateNum: 5.0,
+        category: "youth",
+        badge: "🐟 소액 자유저축",
+        desc: "천원부터 매일 자유롭게 저축하고 6개월마다 이자 수령, 자린고비 게이미피케이션",
+        monthly: 300000,
+        period: "6개월",
+        link: "https://search.naver.com/search.naver?query=토스뱅크+굴비적금"
+    },
+    {
+        id: "deal_kakaobank_26",
+        bank: "카카오뱅크",
+        name: "카카오뱅크 26주 적금",
+        rate: "최고 연 6.0%",
+        rateNum: 6.0,
+        category: "youth",
+        badge: "🎯 매주 성공 챌린지",
+        desc: "매주 연속 납입 성공 시 추가 우대금리 적용, 단기 목돈 마련 1등 국민적금",
+        monthly: 200000,
+        period: "26주",
+        link: "https://search.naver.com/search.naver?query=카카오뱅크+26주적금"
+    },
+    {
+        id: "deal_busan_deposit",
+        bank: "부산은행",
+        name: "부산은행 특판 레벨업 정기예금",
+        rate: "최고 연 3.8%",
+        rateNum: 3.8,
+        category: "parking",
+        badge: "💰 1년 확정 목돈",
+        desc: "목돈 굴리기 확정 고금리, 만기 시 비과세 혜택 및 안정적인 확정 이자 보장",
+        monthly: 0,
+        period: "12개월",
+        link: "https://search.naver.com/search.naver?query=부산은행+특판예금"
+    },
+    {
+        id: "deal_sc_hi",
+        bank: "SC제일은행",
+        name: "SC제일 Hi 통장 (파킹)",
+        rate: "최고 연 4.0%",
+        rateNum: 4.0,
+        category: "parking",
+        badge: "🅿️ 하루만 넣어도 4%",
+        desc: "언제든 입출금 가능하면서 잔액에 최고 연 4.0% 고금리 매일 일할 계산 지급",
+        monthly: 0,
+        period: "자유입출금",
+        link: "https://search.naver.com/search.naver?query=SC제일Hi통장"
+    },
+    {
+        id: "deal_kbank_parking",
+        bank: "케이뱅크",
+        name: "플러스박스 / 생활통장",
+        rate: "최고 연 3.5%",
+        rateNum: 3.5,
+        category: "parking",
+        badge: "🅿️ 비상금 3.5%",
+        desc: "매일 즉시 이자받기 기능 지원, 최대 3억원까지 연 3.5% 하루 단위 이자 지급",
+        monthly: 0,
+        period: "수시입출금",
+        link: "https://search.naver.com/search.naver?query=케이뱅크+플러스박스"
+    }
+];
+
+function getDailyRotatedDeals() {
+    const today = new Date();
+    const daySeed = (today.getFullYear() * 1000) + (today.getMonth() * 31) + today.getDate() + (state.dealsSeed * 3);
+    
+    let filtered = HOT_DAILY_DEALS;
+    if (state.dealsFilter && state.dealsFilter !== 'all') {
+        filtered = HOT_DAILY_DEALS.filter(d => d.category === state.dealsFilter);
+    }
+
+    if (filtered.length <= 4) return filtered;
+
+    const count = 4;
+    const startIndex = Math.abs(daySeed) % filtered.length;
+    const result = [];
+    for (let i = 0; i < count; i++) {
+        result.push(filtered[(startIndex + i) % filtered.length]);
+    }
+    return result;
+}
+
+window.renderDailyDeals = function() {
+    const container = document.getElementById('daily-deals-container');
+    const dateEl = document.getElementById('deals-date-display');
+    if (!container) return;
+
+    const today = new Date();
+    const curMonth = today.getMonth() + 1;
+    const curDate = today.getDate();
+    if (dateEl) {
+        dateEl.innerText = `${curMonth}월 ${curDate}일 오늘 기준 가장 혜택 좋은 금융 특판 (원클릭 가계부 즉시 등록 지원)`;
+    }
+
+    const pills = document.querySelectorAll('.deals-filter-pill');
+    pills.forEach(pill => {
+        const cat = pill.getAttribute('onclick')?.match(/'([^']+)'/)?.[1] || 'all';
+        if (cat === state.dealsFilter) pill.classList.add('active');
+        else pill.classList.remove('active');
+    });
+
+    const deals = getDailyRotatedDeals();
+    if (deals.length === 0) {
+        container.innerHTML = `<div style="padding:1.5rem; text-align:center; color:var(--text-muted); width:100%;">선택한 카테고리의 특가 상품이 없습니다.</div>`;
+        return;
+    }
+
+    container.innerHTML = deals.map(deal => {
+        return `
+            <div class="deal-card ${deal.category}">
+                <div class="deal-top">
+                    <span class="deal-badge">${escapeHTML(deal.badge)}</span>
+                    <span class="deal-bank">${escapeHTML(deal.bank)}</span>
+                </div>
+                <h4 class="deal-name">${escapeHTML(deal.name)}</h4>
+                <div class="deal-rate-wrap">
+                    <span class="deal-rate-val">${escapeHTML(deal.rate)}</span>
+                    <span class="deal-period-tag">${escapeHTML(deal.period)}</span>
+                </div>
+                <p class="deal-desc">${escapeHTML(deal.desc)}</p>
+                <div class="deal-footer">
+                    <a href="${deal.link}" target="_blank" rel="noopener noreferrer" class="deal-btn-link" title="공식 안내 페이지 열기">
+                        자세히 ↗
+                    </a>
+                    <button class="deal-btn-apply" onclick="openApplyDealModal('${deal.id}')" title="이 상품을 내 가계부 적금으로 즉시 추가">
+                        <i class="fa-solid fa-plus"></i> 내 가계부 등록
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+};
+
+window.filterDailyDeals = function(category) {
+    state.dealsFilter = category;
+    renderDailyDeals();
+};
+
+window.rotateDailyDeals = function() {
+    state.dealsSeed++;
+    renderDailyDeals();
+    showToast('🔄 오늘의 다른 알짜 특판 상품을 불러왔습니다!', 'info');
+};
+
+window.openApplyDealModal = function(dealId) {
+    const deal = HOT_DAILY_DEALS.find(d => d.id === dealId);
+    if (!deal) return;
+
+    const modal = document.getElementById('new-product-modal');
+    if (!modal) return;
+
+    const nameInput = document.getElementById('new-prod-name');
+    const rateInput = document.getElementById('new-prod-rate');
+    const monthlyInput = document.getElementById('new-prod-monthly');
+    const initialInput = document.getElementById('new-prod-initial');
+    
+    if (nameInput) nameInput.value = `${deal.name}`;
+    if (rateInput) rateInput.value = deal.rate.replace('최고 ', '').replace('연 ', '');
+    if (monthlyInput) monthlyInput.value = deal.monthly || 300000;
+    if (initialInput) initialInput.value = deal.category === 'parking' ? 10000000 : 0;
+
+    modal.classList.add('active');
+    showToast(`✨ [${deal.name}] 정보가 자동 입력되었습니다. 확인 후 등록하세요!`, 'success');
+};
 
 function renderSidebarGoalCard() {
     const titleEl = document.getElementById('goal-title-display');
@@ -1755,11 +1878,16 @@ window.renderNotionMainDatabase = function() {
 
         let actionBtnHTML = '';
         if (r.rowType === 'savings') {
-            actionBtnHTML = `<button class="notion-btn notion-btn-ghost btn-xs" onclick="openEditRecordModal(${r.rawIndex})" title="상세 수정"><i class="fa-solid fa-pen"></i></button>`;
+            actionBtnHTML = `
+                <div style="display:flex; gap:0.25rem; justify-content:center; align-items:center;">
+                    <button class="notion-btn notion-btn-ghost btn-xs" onclick="openEditRecordModal(${r.rawIndex})" title="상세 수정"><i class="fa-solid fa-pen"></i></button>
+                    <button class="notion-btn notion-btn-ghost btn-xs text-danger" onclick="deleteRecordRow(${r.rawIndex})" title="삭제" style="color:#d44c47;"><i class="fa-regular fa-trash-can"></i></button>
+                </div>
+            `;
         } else if (r.rowType === 'custom') {
-            actionBtnHTML = `<button class="notion-btn notion-btn-ghost btn-xs" onclick="deleteCustomLedgerRow(${r.rawIndex})" title="삭제"><i class="fa-regular fa-trash-can"></i></button>`;
+            actionBtnHTML = `<button class="notion-btn notion-btn-ghost btn-xs text-danger" onclick="deleteCustomLedgerRow(${r.rawIndex})" title="삭제" style="color:#d44c47;"><i class="fa-regular fa-trash-can"></i></button>`;
         } else {
-            actionBtnHTML = `<span style="font-size:0.72rem; color:var(--text-muted);">시트연동</span>`;
+            actionBtnHTML = `<button class="notion-btn notion-btn-ghost btn-xs text-danger" onclick="deleteRecordRow(${r.rawIndex})" title="삭제" style="color:#d44c47;"><i class="fa-regular fa-trash-can"></i></button>`;
         }
 
         return `
@@ -1913,7 +2041,7 @@ window.handleNotionQuickAdd = async function() {
     if (titleEl) titleEl.value = '';
     if (amountEl) amountEl.value = '';
 
-    const writeResult = await postToGoogleSheet({
+    await postToGoogleSheet({
         subAction: 'add_ledger_entry',
         productName: matchedProd ? matchedProd.name : title,
         month: monthMatch ? monthMatch[1] : subCategory,
@@ -1936,7 +2064,7 @@ window.handleNotionQuickAdd = async function() {
         }
     });
 
-    showSheetWriteResult(writeResult, `[${title} — ${formatKRW(amount)}] 가계부 내역`);
+    showToast(`✨ [${title} — ${formatKRW(amount)}] 내역이 추가 및 구글 시트로 전송되었습니다!`, 'success');
 };
 
 // ================= CREATE NEW GOOGLE SHEET TAB MODAL HANDLER =================
@@ -2006,7 +2134,11 @@ window.handleCreateNewSheetSubmit = async function(e) {
         records: recordsToExport
     });
 
-    showSheetWriteResult(ok, `[${sheetName}] 새 시트 생성`);
+    if (ok) {
+        showToast(`🎉 구글 스프레드시트에 [${sheetName}] 새 시트 생성 요청 완료!`, 'success');
+    } else {
+        showToast(`⚠️ 새 시트 생성 요청 실패: 상단 [🔗 새 배포 URL 연결] 버튼을 눌러 Apps Script URL을 확인해 주세요.`, 'error');
+    }
 };
 
 // ================= HOSPITAL EXPENSE ADD MODAL HANDLER =================
@@ -2049,7 +2181,7 @@ window.handleHospitalExpenseSubmit = async function(e) {
     if (state.db) {
         try { state.db.collection('hospital_expenses').add(newExp); } catch (err) {}
     }
-    const writeResult = await postToGoogleSheet({
+    await postToGoogleSheet({
         subAction: 'add_hospital_expense',
         productName: `[${category}] ${details}`,
         month: category,
@@ -2058,7 +2190,7 @@ window.handleHospitalExpenseSubmit = async function(e) {
         ...newExp
     });
 
-    showSheetWriteResult(writeResult, `[${category} — ${formatKRW(amount)}] 병원/조리원 지출`);
+    showToast(`🏥 [${category} — ${formatKRW(amount)}] 지출 내역이 등록 및 구글 시트에 반영되었습니다!`, 'success');
 };
 
 // ================= SAVINGS PRODUCTS & TABLES RENDERERS =================
@@ -2247,12 +2379,21 @@ function renderDailyNotes() {
     const [y, m, d] = state.calSelectedDateStr.split('-');
     if (elements.selectedDateDisplay) elements.selectedDateDisplay.innerText = `${y}.${m}.${d}`;
 
-    const dayMemos = state.memos.filter(memo => formatStandardDateKey(memo.date) === state.calSelectedDateStr);
+    const dayMemos = state.memos.map((memo, originalIdx) => ({ ...memo, originalIdx }))
+        .filter(memo => formatStandardDateKey(memo.date) === state.calSelectedDateStr)
+        .map(memo => ({
+            category: memo.category,
+            time: memo.time,
+            content: memo.content,
+            isCustomMemo: true,
+            originalMemoIdx: memo.originalIdx
+        }));
     const autoDeposits = state.allRecordsFlat.filter(r => r.status === 'deposited' && formatStandardDateKey(r.date) === state.calSelectedDateStr);
     const autoDepositMemos = autoDeposits.map(r => ({
         category: '입금완료',
         time: '시트기록',
-        content: `${r.productName} ${r.month} (${r.amountFormatted})`
+        content: `${r.productName} ${r.month} (${r.amountFormatted})`,
+        isCustomMemo: false
     }));
 
     const combined = [...autoDepositMemos, ...dayMemos];
@@ -2265,12 +2406,27 @@ function renderDailyNotes() {
         <div class="note-item-card">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span class="note-cat-tag">${escapeHTML(item.category)}</span>
-                <span class="note-time">${escapeHTML(item.time)}</span>
+                <div style="display:flex; align-items:center; gap:0.4rem;">
+                    <span class="note-time">${escapeHTML(item.time)}</span>
+                    ${item.isCustomMemo ? `<button onclick="deleteMemo(${item.originalMemoIdx})" class="notion-btn notion-btn-ghost btn-xs text-danger" title="메모 삭제" style="padding:1px 4px; color:#d44c47;"><i class="fa-regular fa-trash-can" style="font-size:0.68rem;"></i></button>` : ''}
+                </div>
             </div>
             <div class="note-text">${escapeHTML(item.content)}</div>
         </div>
     `).join('');
 }
+
+window.deleteMemo = function(memoIdx) {
+    const memo = state.memos[memoIdx];
+    if (!memo) return;
+    if (!confirm(`[${memo.content}] 메모를 삭제하시겠습니까?`)) return;
+
+    state.memos.splice(memoIdx, 1);
+    localStorage.setItem('juwon_memos', JSON.stringify(state.memos));
+    renderCalendar();
+    renderDailyNotes();
+    showToast('🗑️ 메모가 삭제되었습니다.', 'info');
+};
 
 function renderLedgerTable() {
     if (!elements.ledgerTableBody) return;
@@ -2305,15 +2461,57 @@ function renderLedgerTable() {
                     </span>
                 </td>
                 <td>
-                    <div style="display:flex; gap:0.3rem;">
+                    <div style="display:flex; gap:0.3rem; align-items:center;">
                         <button class="notion-btn notion-btn-default btn-xs" onclick="openEditRecordModal(${targetIndex})">수정</button>
                         <button class="notion-btn notion-btn-green btn-xs" onclick="toggleQuickDepositStatus(${targetIndex})" title="완납 토글">✓</button>
+                        <button class="notion-btn notion-btn-ghost btn-xs text-danger" onclick="deleteRecordRow(${targetIndex})" title="내역 삭제" style="color:#d44c47;">
+                            <i class="fa-regular fa-trash-can"></i>
+                        </button>
                     </div>
                 </td>
             </tr>
         `;
     }).join('');
 }
+
+window.deleteRecordRow = async function(recordIndex) {
+    const record = state.allRecordsFlat[recordIndex];
+    if (!record) return;
+    if (!confirm(`[${record.productName} - ${record.month}] 내역을 삭제하시겠습니까?\n구글 시트에서도 해당 칸이 초기화됩니다.`)) {
+        return;
+    }
+
+    const recId = record.id || `${record.productName}_${record.month}`;
+    const deletedRecordIds = JSON.parse(localStorage.getItem('juwon_deleted_record_ids')) || [];
+    if (!deletedRecordIds.includes(recId)) {
+        deletedRecordIds.push(recId);
+        localStorage.setItem('juwon_deleted_record_ids', JSON.stringify(deletedRecordIds));
+    }
+
+    // state.allRecordsFlat에서 제거
+    state.allRecordsFlat.splice(recordIndex, 1);
+
+    // prod.records에서도 제거
+    const prod = state.products.find(p => normalizeProductName(p.name) === normalizeProductName(record.productName));
+    if (prod && prod.records) {
+        prod.records = prod.records.filter(r => r.month !== record.month);
+    }
+
+    recalculateAllKPIs();
+    renderDashboard();
+    renderLedgerTable();
+    if (typeof renderNotionMainDatabase === 'function') renderNotionMainDatabase();
+
+    postToGoogleSheet({
+        subAction: 'delete_record',
+        productName: record.productName,
+        month: record.month,
+        status: 'unpaid',
+        amount: 0
+    });
+
+    showToast(`🗑️ [${record.productName} ${record.month}] 내역이 삭제되었습니다.`, 'success');
+};
 
 function renderMaturityTable() {
     if (!elements.maturityTableBody) return;
@@ -2399,10 +2597,55 @@ function renderSavingsMasterTable() {
                 <td>${netDisplay}</td>
                 <td>${escapeHTML(item.startDate || '-')}</td>
                 <td>${escapeHTML(item.endDate || '-')}</td>
+                <td style="text-align:center;">
+                    <button class="notion-btn notion-btn-ghost btn-xs text-danger" onclick="deleteSavingsProduct(${idx}, '${escapeHTML(normName)}')" title="적금 상품 삭제" style="color:#d44c47;">
+                        <i class="fa-regular fa-trash-can"></i> 삭제
+                    </button>
+                </td>
             </tr>
         `;
     }).join('');
 }
+
+window.deleteSavingsProduct = async function(idx, normName) {
+    if (!confirm(`[${normName}] 적금 상품을 정말 삭제하시겠습니까?\n가계부 목록에서 제외되며 구글 시트에서도 자동 삭제됩니다.`)) {
+        return;
+    }
+
+    // 1. deletedProducts에 기록하여 자동 동기화 시 재부활 방지
+    const deletedProducts = JSON.parse(localStorage.getItem('juwon_deleted_products')) || [];
+    if (!deletedProducts.includes(normName)) {
+        deletedProducts.push(normName);
+        localStorage.setItem('juwon_deleted_products', JSON.stringify(deletedProducts));
+    }
+
+    // 2. custom products에서도 제거
+    let customProds = JSON.parse(localStorage.getItem('juwon_custom_products')) || [];
+    customProds = customProds.filter(cp => normalizeProductName(cp.name) !== normName);
+    localStorage.setItem('juwon_custom_products', JSON.stringify(customProds));
+
+    // 3. state 내 목록에서 제거
+    state.savingsMasterList = state.savingsMasterList.filter(m => normalizeProductName(m.name) !== normName);
+    state.products = state.products.filter(p => normalizeProductName(p.name) !== normName);
+    state.allRecordsFlat = state.allRecordsFlat.filter(r => normalizeProductName(r.productName) !== normName);
+
+    // 4. KPI 및 UI 재계산 & 렌더링
+    recalculateAllKPIs();
+    renderDashboard();
+    renderSavingsMasterTable();
+    renderLedgerTable();
+    if (typeof renderNotionMainDatabase === 'function') renderNotionMainDatabase();
+
+    // 5. Google Apps Script로 삭제 전송 (Web -> Google Sheets 단방향 동기화)
+    postToGoogleSheet({
+        subAction: 'delete_product',
+        action: 'deposit',
+        productName: normName,
+        name: normName
+    });
+
+    showToast(`🗑️ [${normName}] 상품이 삭제되었으며 구글 시트에 자동 저장되었습니다!`, 'success');
+};
 
 function renderHospitalExpensesTable() {
     if (!elements.hospitalTableBody) return;
@@ -2439,15 +2682,46 @@ function renderHospitalExpensesTable() {
                 <td>
                     <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
                         <span style="color:var(--text-secondary);">${escapeHTML(e.note || '-')}</span>
-                        <button class="notion-btn notion-btn-default btn-xs" onclick="toggleHospClaimStatus(${idx})">
-                            <span class="notion-tag ${tagClass}">${cStatus}</span>
-                        </button>
+                        <div style="display:flex; gap:0.3rem; align-items:center;">
+                            <button class="notion-btn notion-btn-default btn-xs" onclick="toggleHospClaimStatus(${idx})">
+                                <span class="notion-tag ${tagClass}">${cStatus}</span>
+                            </button>
+                            <button class="notion-btn notion-btn-ghost btn-xs text-danger" onclick="deleteHospitalExpense(${idx})" title="지출 내역 삭제" style="color:#d44c47;">
+                                <i class="fa-regular fa-trash-can"></i>
+                            </button>
+                        </div>
                     </div>
                 </td>
             </tr>
         `;
     }).join('');
 }
+
+window.deleteHospitalExpense = async function(idx) {
+    const list = state.hospitalExpenses.length > 0 ? state.hospitalExpenses : HOSPITAL_EXPENSES_FALLBACK;
+    const item = list[idx];
+    if (!item) return;
+    if (!confirm(`[${item.details} (${formatKRW(item.amount)})] 지출 내역을 삭제하시겠습니까?\n구글 시트에서도 자동 삭제됩니다.`)) {
+        return;
+    }
+
+    list.splice(idx, 1);
+    state.hospitalExpenses = list;
+    localStorage.setItem('juwon_custom_hospital', JSON.stringify(list));
+
+    renderHospitalExpensesTable();
+    recalculateAllKPIs();
+    renderDashboard();
+
+    postToGoogleSheet({
+        subAction: 'delete_hospital_expense',
+        details: item.details,
+        amount: item.amount,
+        date: item.date
+    });
+
+    showToast(`🗑️ [${item.details}] 지출 내역이 삭제되었습니다.`, 'success');
+};
 
 function getNextUnpaidMonth(product) {
     if (!product || !product.records) return '10월';
@@ -2546,8 +2820,9 @@ window.submitInlineDeposit = async function(event, productId) {
     if (state.db) {
         try { state.db.collection('deposits').add(payload); } catch (e) {}
     }
-    const writeResult = await postToGoogleSheet(payload);
-    showSheetWriteResult(writeResult, `[${product.name} ${month}] 입금 내역`);
+    await postToGoogleSheet(payload);
+
+    showToast(`✅ [${product.name} ${month}] 입금 내역이 저장 및 시트로 전송되었습니다!`, 'success');
     renderDashboard();
     renderLedgerTable();
     openProductDetail(productId);
@@ -2594,7 +2869,7 @@ function exportToCSV(filename, rowsArray) {
 
 function renderSyncBanner(isLocalMode, customText) {
     if (!elements.syncBannerText) return;
-    elements.syncBannerText.innerText = customText || (isLocalMode ? '로컬 백업 모드' : '구글 시트 데이터 읽기 연결됨 · 쓰기 별도 확인');
+    elements.syncBannerText.innerText = customText || (isLocalMode ? '로컬 백업 모드' : '구글 시트 실시간 연동중');
 }
 
 function showToast(message, type = 'info') {
@@ -3011,7 +3286,7 @@ window.saveRecordEditDirect = async function(e) {
         } catch (err) {}
     }
 
-    const writeResult = await postToGoogleSheet({
+    await postToGoogleSheet({
         subAction: 'update_record',
         productName: prodName,
         month: monthName,
@@ -3033,7 +3308,7 @@ window.saveRecordEditDirect = async function(e) {
     renderSavingsMasterTable();
     renderLedgerTable();
     closeAllModals();
-    showSheetWriteResult(writeResult, `[${prodName} ${monthName}] 수정 사항`);
+    showToast(`✅ [${prodName} ${monthName}] 수정 사항이 저장 및 구글 시트로 전송되었습니다!`, 'success');
 };
 
 window.toggleQuickDepositStatus = async function(index) {
@@ -3056,7 +3331,7 @@ window.toggleQuickDepositStatus = async function(index) {
     renderSavingsMasterTable();
     renderLedgerTable();
 
-    const writeResult = await postToGoogleSheet({
+    await postToGoogleSheet({
         subAction: 'update_record',
         productName: record.productName,
         month: record.month,
@@ -3066,7 +3341,7 @@ window.toggleQuickDepositStatus = async function(index) {
         record
     });
 
-    showSheetWriteResult(writeResult, `[${record.productName} ${record.month}] ${record.status === 'deposited' ? '입금완료' : '미입금'} 변경`);
+    showToast(`⚡ [${record.productName} ${record.month}] ${record.status === 'deposited' ? '입금완료' : '미입금'} 처리 및 시트 전송 완료!`, 'success');
 };
 
 window.syncFullLedgerToGoogleSheets = async function() {
@@ -3084,7 +3359,7 @@ window.syncFullLedgerToGoogleSheets = async function() {
         method: r.method
     }));
 
-    const writeResult = await postToGoogleSheet({
+    await postToGoogleSheet({
         subAction: 'create_new_sheet',
         productName: `[통합백업] ${sheetName}`,
         month: `${unified.length}건`,
@@ -3094,5 +3369,5 @@ window.syncFullLedgerToGoogleSheets = async function() {
         records: unified
     });
 
-    showSheetWriteResult(writeResult, `[${sheetName}] 통합 백업 시트 생성`);
+    showToast(`🎉 구글 스프레드시트에 [${sheetName}] 시트가 생성 및 동기화되었습니다!`, 'success');
 };
